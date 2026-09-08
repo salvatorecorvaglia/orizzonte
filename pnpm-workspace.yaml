@@ -16,8 +16,8 @@ minimumReleaseAgeExclude:
   - '@biomejs/cli-linux-x64@2.5.9 || 2.5.11'
   - '@biomejs/cli-win32-arm64@2.5.9 || 2.5.11'
   - '@biomejs/cli-win32-x64@2.5.9 || 2.5.11'
-  - '@tanstack/react-virtual@3.14.10'
-  - '@tanstack/virtual-core@3.17.8'
+  - '@tanstack/react-virtual@3.14.10 || 3.14.11'
+  - '@tanstack/virtual-core@3.17.8 || 3.17.9'
   - '@types/vscode@1.107.0'
   - '@vitejs/plugin-react@6.1.0 || 6.1.1'
   - vite@8.2.2

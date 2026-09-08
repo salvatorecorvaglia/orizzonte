@@ -296,7 +296,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
-    "@tanstack/react-virtual": "^3.14.10",
+    "@tanstack/react-virtual": "^3.14.11",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",
