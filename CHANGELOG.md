@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-09-05
+
 ### Fixed
 
 - **The Busy Rule Held Only in the Toolbar**: A scan or write in flight disabled "Update All", "Check updates", "Refresh" and "Export report", while every write in the table stayed live — each row's Update and Remove, a group header's "Update All", and the bulk bar's "Update Selected" / "Remove Selected" — as did the detail drawer's own copies of Update and Remove. The same action was offered as both blocked and available on one screen. `busy` now reaches `DepTable` and `DetailDrawer`, and the rule is documented as belonging to the panel rather than to the toolbar that states it, enforced at three sites. Reads are deliberately untouched: selection, sorting, opening a row's details, the drawer's links and metadata, and the bulk bar's "Clear selection" stay available, so the panel does not freeze wholesale while a background check runs.
