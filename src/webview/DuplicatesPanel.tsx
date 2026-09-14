@@ -39,7 +39,7 @@ export function DuplicatesPanel({ results, loading, onClose }: Props) {
   return (
     <section
       className="search-panel"
-      id="panorama-duplicates-panel"
+      id="orizzonte-duplicates-panel"
       aria-label="Duplicate package versions"
       onKeyDown={handlePanelKeyDown}
     >
@@ -74,7 +74,7 @@ export function DuplicatesPanel({ results, loading, onClose }: Props) {
         <div className="banners">
           <div className="callout callout--info" role="status">
             {unchecked.map((id) => ECOSYSTEM_LABELS[id]).join(', ')}{' '}
-            {unchecked.length === 1 ? 'has' : 'have'} no lockfile Panorama can
+            {unchecked.length === 1 ? 'has' : 'have'} no lockfile Orizzonte can
             check for duplicates.
           </div>
         </div>

@@ -199,7 +199,7 @@ export class Scanner {
   ): Promise<{ groups: ProjectGroup[]; manifestPaths: string[] }> {
     const excludes = [
       ...vscode.workspace
-        .getConfiguration('panorama')
+        .getConfiguration('orizzonte')
         .get<string[]>('excludeGlobs', []),
       ...(await this.gitignoreExcludes()),
     ];

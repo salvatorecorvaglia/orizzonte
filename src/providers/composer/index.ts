@@ -2,7 +2,7 @@
  * PHP: composer.json driven by composer.
  *
  * Packagist asks that clients identify themselves with a contact address in the
- * User-Agent; `core/http.ts` adds it from the `panorama.contactEmail` setting.
+ * User-Agent; `core/http.ts` adds it from the `orizzonte.contactEmail` setting.
  */
 
 import * as path from 'node:path';

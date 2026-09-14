@@ -148,7 +148,7 @@ export class DependencyMutator {
 
     if (exitCode !== undefined && exitCode !== 0) {
       this.onCommandFailed(
-        `${argv.join(' ')} failed with exit code ${exitCode}. See the Panorama terminal for details.`,
+        `${argv.join(' ')} failed with exit code ${exitCode}. See the Orizzonte terminal for details.`,
       );
     }
   }

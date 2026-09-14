@@ -1,6 +1,6 @@
-# Contributing to Panorama 🔭
+# Contributing to Orizzonte 🔭
 
-Thank you for your interest in contributing to **Panorama**! We welcome contributions, bug reports, feature requests, and documentation improvements from the community.
+Thank you for your interest in contributing to **Orizzonte**! We welcome contributions, bug reports, feature requests, and documentation improvements from the community.
 
 ---
 
@@ -10,17 +10,17 @@ Before you start, ensure you have the following installed on your system:
 
 - **Node.js**: `v22.13.0` or higher
 - **pnpm**: `v11.23.0` or higher (managed via `packageManager` in `package.json`)
-- **VS Code**: `v1.107.0` or higher (Panorama requires VS Code 1.107+ APIs)
+- **VS Code**: `v1.107.0` or higher (Orizzonte requires VS Code 1.107+ APIs)
 
 ---
 
 ## 🏗️ Architecture Overview
 
-Panorama is structured as a VS Code extension with a dual-layer architecture:
+Orizzonte is structured as a VS Code extension with a dual-layer architecture:
 
-- **Extension Host (`src/`)**: Written in TypeScript and compiled with `esbuild`. Responsible for scanning manifest files concurrently with `.gitignore` awareness (`src/core/workspaces.ts`), workspace file watching (`src/core/watcher.ts`), reference-counted operation tracking (`src/core/busyTracker.ts`), modular lockfile parsing (`src/core/lockfiles/`), package manager CLI execution & terminal orchestration (`src/ui/dependencyMutator.ts`), shared registry API querying & HTTP caching (`src/providers/shared/cachedFetch.ts`), package size tracking, OSV.dev vulnerability auditing (`src/core/audit.ts`), license policy checks (`src/core/licensePolicy.ts`), manifest CodeLenses & Problems-panel diagnostics for outdated/vulnerable dependencies (`src/core/depAnnotations.ts`), dependency report export (`src/core/report.ts`), Git ref comparison for the "Compare with…" action (`src/ui/gitDiff.ts`), sidebar view provider (`panorama.sidebar`), and webview panel lifecycle & typed message routing (`src/ui/panelManager.ts`, `src/core/webviewRequests.ts`).
+- **Extension Host (`src/`)**: Written in TypeScript and compiled with `esbuild`. Responsible for scanning manifest files concurrently with `.gitignore` awareness (`src/core/workspaces.ts`), workspace file watching (`src/core/watcher.ts`), reference-counted operation tracking (`src/core/busyTracker.ts`), modular lockfile parsing (`src/core/lockfiles/`), package manager CLI execution & terminal orchestration (`src/ui/dependencyMutator.ts`), shared registry API querying & HTTP caching (`src/providers/shared/cachedFetch.ts`), package size tracking, OSV.dev vulnerability auditing (`src/core/audit.ts`), license policy checks (`src/core/licensePolicy.ts`), manifest CodeLenses & Problems-panel diagnostics for outdated/vulnerable dependencies (`src/core/depAnnotations.ts`), dependency report export (`src/core/report.ts`), Git ref comparison for the "Compare with…" action (`src/ui/gitDiff.ts`), sidebar view provider (`orizzonte.sidebar`), and webview panel lifecycle & typed message routing (`src/ui/panelManager.ts`, `src/core/webviewRequests.ts`).
 
-- **Webview UI (`src/webview/`)**: React application built with TypeScript, Vite, and TanStack Virtual (`@tanstack/react-virtual`). Rendered inside a VS Code Webview panel (`panorama.open`) for deep, interactive dependency management with full accessibility support (roving `tabindex` table focus, global keyboard shortcuts, dismissable overlay management via `useDismissableOverlay`, the toolbar overflow menu's `role="menu"` keyboard pattern, error queuing toast alerts, and ARIA live progress indicators).
+- **Webview UI (`src/webview/`)**: React application built with TypeScript, Vite, and TanStack Virtual (`@tanstack/react-virtual`). Rendered inside a VS Code Webview panel (`orizzonte.open`) for deep, interactive dependency management with full accessibility support (roving `tabindex` table focus, global keyboard shortcuts, dismissable overlay management via `useDismissableOverlay`, the toolbar overflow menu's `role="menu"` keyboard pattern, error queuing toast alerts, and ARIA live progress indicators).
 
 ### Webview conventions
 
@@ -28,8 +28,8 @@ A few rules the webview is written to. They are easy to break by accident and ch
 
 - **One overlay panel at a time**: search, duplicate versions, licenses and the dependency diff are driven by a single `activePanel` value in `App.tsx` (`PanelId`, exported from `Toolbar.tsx`), not a boolean each. Independent flags let all four stack over the table and made the toolbar's `aria-expanded` states something to maintain separately rather than derive.
 - **The dependency grid is one tab stop**: rows carry the roving `tabindex`; the controls inside a row (`checkbox`, Update, Remove) carry `tabIndex={-1}` and are reached with Left/Right from their row. A new native control inside a row needs `tabIndex={-1}`, or it multiplies tab stops by the row count. A group header's "Update All" is the deliberate exception — one per project, not one per row.
-- **Tokens, not literals, in `theme.css`**: colours come from the VS Code theme tokens or the severity map, and spacing, radii, control sizes and grid tracks come from the `--panorama-*` variables. This holds in `src/ui/sidebarProvider.ts` too — the Activity Bar view is a hand-written HTML document, so it restates the radius scale rather than inheriting it.
-- **Hiding a grid column means restating the tracks**: `display: none` stops an element being a grid item, so every cell after it shifts back one track. Each breakpoint in `theme.css` therefore redefines `--panorama-table-columns` with the columns it still has.
+- **Tokens, not literals, in `theme.css`**: colours come from the VS Code theme tokens or the severity map, and spacing, radii, control sizes and grid tracks come from the `--orizzonte-*` variables. This holds in `src/ui/sidebarProvider.ts` too — the Activity Bar view is a hand-written HTML document, so it restates the radius scale rather than inheriting it.
+- **Hiding a grid column means restating the tracks**: `display: none` stops an element being a grid item, so every cell after it shifts back one track. Each breakpoint in `theme.css` therefore redefines `--orizzonte-table-columns` with the columns it still has.
 - **Reveal-on-hover uses `opacity`**: never `display` or `visibility`, which would take the control out of the accessibility tree and out of the keyboard order the roving `tabindex` exists to provide.
 
 ---
@@ -38,8 +38,8 @@ A few rules the webview is written to. They are easy to break by accident and ch
 
 1. **Fork and clone the repository**:
    ```bash
-   git clone https://github.com/salvatorecorvaglia/panorama.git
-   cd panorama
+   git clone https://github.com/salvatorecorvaglia/orizzonte.git
+   cd orizzonte
    ```
 
 2. **Install dependencies**:
@@ -53,7 +53,7 @@ A few rules the webview is written to. They are easy to break by accident and ch
 
 ### 1. Watch Mode & Local Iteration
 
-To develop Panorama locally with live compilation:
+To develop Orizzonte locally with live compilation:
 
 ```bash
 pnpm run watch
@@ -65,7 +65,7 @@ This starts concurrent watch processes for both the Extension Host (`esbuild`) a
 
 1. Open the project folder in VS Code.
 2. Press **`F5`** (or go to the **Run & Debug** panel and select **Run Extension**).
-3. A new **Extension Development Host** window will launch running your local build of Panorama.
+3. A new **Extension Development Host** window will launch running your local build of Orizzonte.
 4. Open any project or workspace with supported dependency manifests (`package.json`, `Cargo.toml`, `pyproject.toml`, `requirements.txt`, `go.mod`, `composer.json`, `pom.xml`, `build.gradle`, `build.gradle.kts`) to test functionality.
 
 ---
@@ -94,7 +94,7 @@ This starts concurrent watch processes for both the Extension Host (`esbuild`) a
 
 ## 🧪 Testing & Verification Guidelines
 
-Panorama includes comprehensive test suites across three layers:
+Orizzonte includes comprehensive test suites across three layers:
 - **Unit Tests (`tests/unit/`)**: Verifies manifest parsers (`parsers.test.ts`), provider management commands & input validation (`providerCommands.test.ts`, `providerValidation.test.ts`), registry metadata lookups & caching (`registries.test.ts`, `registry.test.ts`, `registryOverride.test.ts`), the TTL cache (`cache.test.ts`), the "why is this installed" dependency graph (`depGraph.test.ts`), busy state management (`busyTracker.test.ts`), webview request routing (`webviewRequests.test.ts`), scan queues (`scanQueue.test.ts`, `serialQueue.test.ts`), shell-argument quoting (`quoting.test.ts`), version utilities (`versions.test.ts`), OSV.dev auditing (`audit.test.ts`), license policy checks (`licensePolicy.test.ts`), manifest CodeLens/diagnostic annotations (`depAnnotations.test.ts`), GitHub "What's Changed" release-note matching (`changelog.test.ts`), declaration lookups (`findDeclaration.test.ts`), report export (`report.test.ts`), and workspace discovery (`workspaces.test.ts`, `vocabulary.test.ts`, `http.test.ts`).
 - **Webview Component Tests (`tests/webview/`)**: Verifies React component logic (`App.test.tsx`, `DepTable.test.tsx`, `SearchInstall.test.tsx`, `DetailDrawer.test.tsx`, `Toolbar.test.tsx`), UI interactions, and VS Code API message communication (`vscodeApi.test.tsx`) using Testing Library & JSDOM.
 - **Integration Tests (`tests/integration/`)**: Verifies host execution inside VS Code Extension Host including terminal command execution (`terminalRunner.test.ts`), manifest mutation (`dependencyMutator.test.ts`), webview panel lifecycle (`panelManager.test.ts`), the sidebar view (`sidebarProvider.test.ts`), workspace file watching (`watcher.test.ts`), webview security & CSP headers (`webviewSecurity.test.ts`), and scanner exclusion policies (`scannerExclusions.test.ts`).

@@ -202,7 +202,7 @@ export interface EcosystemProvider {
 /**
  * The default version grammar, deliberately narrow.
  *
- * Every ecosystem Panorama supports expresses versions and constraints with
+ * Every ecosystem Orizzonte supports expresses versions and constraints with
  * digits, letters and a small set of punctuation. Nothing legitimate needs a
  * quote, a space, a backtick or a dollar sign — the characters that make shell
  * injection possible — so refusing them costs nothing and closes the category.

@@ -354,7 +354,7 @@ export function DepTable({
     return (
       <div className="empty" role="status">
         <h2>Reading your manifests…</h2>
-        <p>Panorama is scanning the workspace for dependency files.</p>
+        <p>Orizzonte is scanning the workspace for dependency files.</p>
       </div>
     );
   }

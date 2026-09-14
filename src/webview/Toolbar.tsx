@@ -27,7 +27,7 @@ interface OverflowItem {
   disabled?: boolean;
 }
 
-const OVERFLOW_MENU_ID = 'panorama-overflow-menu';
+const OVERFLOW_MENU_ID = 'orizzonte-overflow-menu';
 
 /**
  * The toolbar's secondary actions, behind one button.
@@ -353,7 +353,7 @@ export function Toolbar({
             title: 'Find packages resolved at more than one version at once',
             onSelect: onToggleDuplicates,
             expanded: activePanel === 'duplicates',
-            controls: 'panorama-duplicates-panel',
+            controls: 'orizzonte-duplicates-panel',
           },
         ]
       : []),
@@ -366,7 +366,7 @@ export function Toolbar({
             title: "Check every package's license against your allow/deny list",
             onSelect: onToggleLicenses,
             expanded: activePanel === 'licenses',
-            controls: 'panorama-licenses-panel',
+            controls: 'orizzonte-licenses-panel',
           },
         ]
       : []),
@@ -379,7 +379,7 @@ export function Toolbar({
             title: 'Compare dependencies with another branch',
             onSelect: onCompareDependencies,
             expanded: activePanel === 'diff',
-            controls: 'panorama-dependency-diff-panel',
+            controls: 'orizzonte-dependency-diff-panel',
           },
         ]
       : []),
@@ -409,7 +409,7 @@ export function Toolbar({
     <div
       className="toolbar"
       role="toolbar"
-      aria-label="Panorama actions"
+      aria-label="Orizzonte actions"
       ref={container}
       onKeyDown={handleKeyDown}
       onFocus={handleFocus}
@@ -421,7 +421,7 @@ export function Toolbar({
             <Icon name="package" />
           </div>
           <div className="toolbar__title-group">
-            <span className="toolbar__title">Panorama</span>
+            <span className="toolbar__title">Orizzonte</span>
             {/*
               The toolchains in play, and nothing else. An "active" pill said
               only that the panel was rendering, and the package count is in
@@ -487,7 +487,7 @@ export function Toolbar({
           className="btn-accent"
           onClick={onToggleInstall}
           aria-expanded={activePanel === 'search'}
-          aria-controls="panorama-search-panel"
+          aria-controls="orizzonte-search-panel"
         >
           <Icon name={activePanel === 'search' ? 'close' : 'add'} />{' '}
           {activePanel === 'search' ? 'Close search' : 'Add package'}

@@ -116,8 +116,8 @@ describe('buildContentSecurityPolicy', () => {
   /** A real webview, disposed after the test — this needs a live `cspSource`. */
   function withWebview<T>(run: (webview: vscode.Webview) => T): T {
     const panel = vscode.window.createWebviewPanel(
-      'panorama.test',
-      'Panorama Test',
+      'orizzonte.test',
+      'Orizzonte Test',
       vscode.ViewColumn.Active,
       {},
     );

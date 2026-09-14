@@ -21,7 +21,7 @@ const SEVERITY_TO_DIAGNOSTIC: Record<Severity, vscode.DiagnosticSeverity> = {
 
 export class DepDiagnostics implements vscode.Disposable {
   private readonly collection =
-    vscode.languages.createDiagnosticCollection('panorama');
+    vscode.languages.createDiagnosticCollection('orizzonte');
 
   /** Recomputes diagnostics for every manifest currently open in an editor. */
   refresh(result: ScanResult): void {
@@ -48,7 +48,7 @@ export class DepDiagnostics implements vscode.Disposable {
             spec.message,
             SEVERITY_TO_DIAGNOSTIC[spec.severity],
           );
-          diagnostic.source = 'Panorama';
+          diagnostic.source = 'Orizzonte';
           return diagnostic;
         }),
       );

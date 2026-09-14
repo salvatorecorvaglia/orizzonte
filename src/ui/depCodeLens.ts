@@ -32,7 +32,7 @@ export class DepCodeLensProvider implements vscode.CodeLensProvider {
         ).range;
         return new vscode.CodeLens(range, {
           title: spec.title,
-          command: 'panorama.focusDependencyFromLens',
+          command: 'orizzonte.focusDependencyFromLens',
           arguments: [spec.dep.key],
         });
       },

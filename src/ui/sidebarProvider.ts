@@ -34,7 +34,7 @@ function escapeHtml(value: string): string {
 }
 
 export class SidebarViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = 'panorama.sidebar';
+  public static readonly viewType = 'orizzonte.sidebar';
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -63,7 +63,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       (message: { type: string; url?: string }) => {
         switch (message.type) {
           case 'openPanel':
-            void vscode.commands.executeCommand('panorama.open');
+            void vscode.commands.executeCommand('orizzonte.open');
             break;
           case 'openUrl':
             // Through the shared helper, which checks the scheme. This used to
@@ -80,7 +80,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   private getHtmlForWebview(webview: vscode.Webview): string {
     const logoUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'resources', 'panorama.png'),
+      vscode.Uri.joinPath(this.extensionUri, 'resources', 'orizzonte.png'),
     );
 
     const codiconUri = webview.asWebviewUri(
@@ -97,7 +97,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <link href="${codiconUri}" rel="stylesheet" />
-  <title>Panorama Sidebar</title>
+  <title>Orizzonte Sidebar</title>
   <style>
     /*
      * The panel's tokens, restated because this view is a hand-written
@@ -106,9 +106,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
      * between them.
      */
     :root {
-      --panorama-radius: 4px;
-      --panorama-radius-lg: 8px;
-      --panorama-radius-pill: 999px;
+      --orizzonte-radius: 4px;
+      --orizzonte-radius-lg: 8px;
+      --orizzonte-radius-pill: 999px;
     }
 
     * {
@@ -139,7 +139,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       width: 72px;
       height: 72px;
       object-fit: contain;
-      border-radius: var(--panorama-radius-lg);
+      border-radius: var(--orizzonte-radius-lg);
       box-shadow: 0 4px 14px var(--vscode-widget-shadow);
     }
     .title {
@@ -154,7 +154,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       background-color: var(--vscode-badge-background);
       color: var(--vscode-badge-foreground);
       border: 1px solid var(--vscode-badge-background);
-      border-radius: var(--panorama-radius-pill);
+      border-radius: var(--orizzonte-radius-pill);
       font-size: 0.82em;
       font-weight: 600;
       margin-bottom: 14px;
@@ -175,7 +175,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-button-background);
       color: var(--vscode-button-foreground);
       border: none;
-      border-radius: var(--panorama-radius);
+      border-radius: var(--orizzonte-radius);
       font-size: 0.95em;
       font-weight: 600;
       cursor: pointer;
@@ -218,7 +218,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       padding: 10px 12px;
       background: var(--vscode-sideBar-background);
       border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-      border-radius: var(--panorama-radius-lg);
+      border-radius: var(--orizzonte-radius-lg);
       margin-bottom: 12px;
       cursor: pointer;
       transition: background 0.15s ease, border-color 0.15s ease;
@@ -261,7 +261,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       background: transparent;
       color: var(--vscode-foreground);
       border: 1px solid var(--vscode-widget-border);
-      border-radius: var(--panorama-radius);
+      border-radius: var(--orizzonte-radius);
       font-size: 0.85em;
       font-weight: 500;
       cursor: pointer;
@@ -306,10 +306,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 <body>
   <div class="sidebar">
     <div class="logo-container">
-      <img src="${logoUri}" alt="Panorama Logo" class="logo-img" />
+      <img src="${logoUri}" alt="Orizzonte Logo" class="logo-img" />
     </div>
 
-    <h2 class="title">Panorama</h2>
+    <h2 class="title">Orizzonte</h2>
     <span class="version-badge">v${escapeHtml(this.version)}</span>
 
     <p class="description">
@@ -317,7 +317,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     </p>
 
     <button type="button" class="btn-primary" id="btn-open">
-      Open Panorama
+      Open Orizzonte
     </button>
 
     <div class="divider"></div>
@@ -339,7 +339,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       -->
       <button type="button" class="repo-card" id="link-repo">
         <div class="repo-title">
-          salvatorecorvaglia/panorama
+          salvatorecorvaglia/orizzonte
         </div>
         <div class="repo-sub">Source code, releases &amp; issues</div>
       </button>
@@ -369,7 +369,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       vscode.postMessage({ type: 'openPanel' });
     });
 
-    const repoUrl = 'https://github.com/salvatorecorvaglia/panorama';
+    const repoUrl = 'https://github.com/salvatorecorvaglia/orizzonte';
 
     document.getElementById('link-repo').addEventListener('click', () => {
       vscode.postMessage({ type: 'openUrl', url: repoUrl });

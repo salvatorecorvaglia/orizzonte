@@ -2,7 +2,7 @@
  * `panelManager.ts` imports `vscode`, so it cannot be loaded under vitest at
  * all (see the exclusion list in `vitest.config.ts`). It is also the
  * largest untested file in the codebase — `extension.test.ts`'s "commands
- * are safe to invoke" suite only checks that the `panorama.open` command
+ * are safe to invoke" suite only checks that the `orizzonte.open` command
  * does not throw; it never sends a message into the resulting panel.
  *
  * `vscode.window.createWebviewPanel` is called internally by `reveal()`, so
@@ -156,7 +156,8 @@ describe('PanelManager message handling', () => {
     const ctx = createProviderContext(http, cache);
     const scanner = new Scanner(ctx);
     return new PanelManager(
-      vscode.extensions.getExtension('panorama.panorama-vscode')!.extensionUri,
+      vscode.extensions.getExtension('orizzonte.orizzonte-vscode')!
+        .extensionUri,
       scanner,
       ctx,
       () => undefined,
@@ -233,7 +234,7 @@ describe('PanelManager message handling', () => {
     manager = makeManager();
 
     const tmpDir = await fs.realpath(
-      await fs.mkdtemp(path.join(os.tmpdir(), 'panorama-panel-manifest-')),
+      await fs.mkdtemp(path.join(os.tmpdir(), 'orizzonte-panel-manifest-')),
     );
     const manifestPath = path.join(tmpDir, 'package.json');
     await fs.writeFile(manifestPath, '{"name":"demo","dependencies":{}}\n');
@@ -313,7 +314,7 @@ describe('PanelManager message handling', () => {
     manager = makeManager();
 
     const tmpDir = await fs.realpath(
-      await fs.mkdtemp(path.join(os.tmpdir(), 'panorama-panel-duplicates-')),
+      await fs.mkdtemp(path.join(os.tmpdir(), 'orizzonte-panel-duplicates-')),
     );
     const manifestPath = path.join(tmpDir, 'package.json');
     await fs.writeFile(manifestPath, '{"name":"demo","dependencies":{}}\n');

@@ -30,7 +30,7 @@ import { SidebarViewProvider } from './ui/sidebarProvider.js';
  * Deliberately tiny and read-only: it exists so integration tests can assert on
  * a real scan rather than scraping the UI, and is not a public extension API.
  */
-export interface PanoramaApi {
+export interface OrizzonteApi {
   /** Runs a scan. Pass `checkUpdates: false` to stay entirely offline. */
   scan(options?: {
     checkUpdates?: boolean;
@@ -53,19 +53,19 @@ export interface PanoramaApi {
  * as a side effect of failing.
  */
 const NO_SELECTION_MESSAGE =
-  'Select a package in the Panorama panel or sidebar first.';
+  'Select a package in the Orizzonte panel or sidebar first.';
 
-export function activate(context: vscode.ExtensionContext): PanoramaApi {
+export function activate(context: vscode.ExtensionContext): OrizzonteApi {
   const version =
     (context.extension.packageJSON as { version?: string }).version ?? '0.0.0';
-  const config = () => vscode.workspace.getConfiguration('panorama');
+  const config = () => vscode.workspace.getConfiguration('orizzonte');
 
   /**
    * Under the integration test host every scan stays offline.
    *
    * Registry results change daily and CI may have no egress at all, so a suite
    * that reached the network would be both slow and flaky. Tests that genuinely
-   * want a lookup can still opt in through `PanoramaApi.scan`.
+   * want a lookup can still opt in through `OrizzonteApi.scan`.
    */
   const isTestHost = context.extensionMode === vscode.ExtensionMode.Test;
 
@@ -83,12 +83,12 @@ export function activate(context: vscode.ExtensionContext): PanoramaApi {
   const scanner = new Scanner(providerContext);
 
   const statusBar = vscode.window.createStatusBarItem(
-    'panorama.status',
+    'orizzonte.status',
     vscode.StatusBarAlignment.Right,
     100,
   );
-  statusBar.name = 'Panorama Dependencies';
-  statusBar.command = 'panorama.open';
+  statusBar.name = 'Orizzonte Dependencies';
+  statusBar.command = 'orizzonte.open';
 
   const codeLensProvider = new DepCodeLensProvider(() => panel.currentResult);
   const diagnostics = new DepDiagnostics();
@@ -135,13 +135,13 @@ export function activate(context: vscode.ExtensionContext): PanoramaApi {
 
       if (result.summary.stale) {
         vscode.window.setStatusBarMessage(
-          '$(cloud-offline) Panorama: showing cached data — registries unreachable',
+          '$(cloud-offline) Orizzonte: showing cached data — registries unreachable',
           5000,
         );
       }
       if (scanner.hitManifestLimit) {
         vscode.window.setStatusBarMessage(
-          `$(warning) Panorama: stopped at ${Scanner.manifestLimit} manifests — add patterns to panorama.excludeGlobs`,
+          `$(warning) Orizzonte: stopped at ${Scanner.manifestLimit} manifests — add patterns to orizzonte.excludeGlobs`,
           8000,
         );
       }
@@ -157,7 +157,7 @@ export function activate(context: vscode.ExtensionContext): PanoramaApi {
         const more =
           unreadable.length > 3 ? ` and ${unreadable.length - 3} more` : '';
         vscode.window.setStatusBarMessage(
-          `$(warning) Panorama: could not read ${names}${more}`,
+          `$(warning) Orizzonte: could not read ${names}${more}`,
           8000,
         );
       }
@@ -165,7 +165,7 @@ export function activate(context: vscode.ExtensionContext): PanoramaApi {
     } catch (error) {
       if (!isAbort(error)) {
         void vscode.window.showErrorMessage(
-          `Panorama scan failed: ${describe(error)}`,
+          `Orizzonte scan failed: ${describe(error)}`,
         );
       }
       return undefined;
@@ -209,36 +209,36 @@ export function activate(context: vscode.ExtensionContext): PanoramaApi {
     // in package.json), since it exists purely to give a lens something to
     // invoke.
     vscode.commands.registerCommand(
-      'panorama.focusDependencyFromLens',
+      'orizzonte.focusDependencyFromLens',
       (depKey: string) => {
         panel.revealDependency(depKey, 'details');
       },
     ),
 
-    vscode.commands.registerCommand('panorama.open', () => {
+    vscode.commands.registerCommand('orizzonte.open', () => {
       panel.reveal();
       void runScan(networkAllowed());
     }),
 
-    vscode.commands.registerCommand('panorama.refresh', () =>
+    vscode.commands.registerCommand('orizzonte.refresh', () =>
       runScan(networkAllowed()),
     ),
 
     // Explicit user intent, so this ignores autoCheckUpdates — but still stays
     // offline under the test host.
-    vscode.commands.registerCommand('panorama.checkUpdates', () =>
+    vscode.commands.registerCommand('orizzonte.checkUpdates', () =>
       runScan(!isTestHost),
     ),
 
-    vscode.commands.registerCommand('panorama.searchInstall', () => {
+    vscode.commands.registerCommand('orizzonte.searchInstall', () => {
       panel.revealSearch();
     }),
 
-    vscode.commands.registerCommand('panorama.updateAll', async () => {
+    vscode.commands.registerCommand('orizzonte.updateAll', async () => {
       const groups = panel.currentResult.groups;
       if (groups.length === 0) {
         void vscode.window.showInformationMessage(
-          'Panorama has not found any manifests yet.',
+          'Orizzonte has not found any manifests yet.',
         );
         return;
       }
@@ -249,11 +249,11 @@ export function activate(context: vscode.ExtensionContext): PanoramaApi {
       await panel.updateAll(target.manifestPath);
     }),
 
-    vscode.commands.registerCommand('panorama.exportReport', async () => {
+    vscode.commands.registerCommand('orizzonte.exportReport', async () => {
       const result = panel.currentResult;
       if (result.groups.length === 0) {
         void vscode.window.showInformationMessage(
-          'Panorama has not found any manifests yet.',
+          'Orizzonte has not found any manifests yet.',
         );
         return;
       }
@@ -284,7 +284,10 @@ export function activate(context: vscode.ExtensionContext): PanoramaApi {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
       const target = await vscode.window.showSaveDialog({
         defaultUri: workspaceFolder
-          ? vscode.Uri.joinPath(workspaceFolder, `panorama-report.${extension}`)
+          ? vscode.Uri.joinPath(
+              workspaceFolder,
+              `orizzonte-report.${extension}`,
+            )
           : undefined,
         filters: format === 'json' ? { JSON: ['json'] } : { Markdown: ['md'] },
       });
@@ -294,7 +297,7 @@ export function activate(context: vscode.ExtensionContext): PanoramaApi {
 
       const openAction = 'Open';
       const choice = await vscode.window.showInformationMessage(
-        `Panorama report saved to ${vscode.workspace.asRelativePath(target)}`,
+        `Orizzonte report saved to ${vscode.workspace.asRelativePath(target)}`,
         openAction,
       );
       if (choice === openAction) {
@@ -305,7 +308,7 @@ export function activate(context: vscode.ExtensionContext): PanoramaApi {
 
     // Invoked from the command palette, which carries no argument — the row
     // the user last opened in the drawer is the selection it acts on.
-    vscode.commands.registerCommand('panorama.showWhy', () => {
+    vscode.commands.registerCommand('orizzonte.showWhy', () => {
       const dep = findDependency(
         panel.currentResult,
         panel.lastSelectedKey,
@@ -319,19 +322,19 @@ export function activate(context: vscode.ExtensionContext): PanoramaApi {
 
     // Rebuilding the User-Agent keeps the contact address in sync with settings.
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration('panorama.contactEmail')) {
+      if (event.affectsConfiguration('orizzonte.contactEmail')) {
         http.setContactEmail(version, config().get<string>('contactEmail'));
       }
       if (
-        event.affectsConfiguration('panorama.excludeGlobs') ||
-        event.affectsConfiguration('panorama.preferredNodeManager') ||
-        event.affectsConfiguration('panorama.pythonManager')
+        event.affectsConfiguration('orizzonte.excludeGlobs') ||
+        event.affectsConfiguration('orizzonte.preferredNodeManager') ||
+        event.affectsConfiguration('orizzonte.pythonManager')
       ) {
         void runScan(false);
       }
       // Re-arm rather than wait for a window reload — a setting that only takes
       // effect after a restart reads as a setting that does not work.
-      if (event.affectsConfiguration('panorama.checkIntervalMinutes')) {
+      if (event.affectsConfiguration('orizzonte.checkIntervalMinutes')) {
         armPeriodicCheck();
       }
     }),
@@ -465,14 +468,14 @@ function updateStatusBar(item: vscode.StatusBarItem, result: ScanResult): void {
     parts.length > 0
       ? `$(package) ${parts.join(' ')}`
       : `$(package) ${totalDependencies}`;
-  item.tooltip = `Panorama — ${totalDependencies} dependencies, ${outdated} outdated, ${vulnerable} vulnerable`;
+  item.tooltip = `Orizzonte — ${totalDependencies} dependencies, ${outdated} outdated, ${vulnerable} vulnerable`;
   /*
    * `text` is icons and bare numbers ("$(shield) 1 $(arrow-up) 6"), which a
    * screen reader reads as two unexplained digits. The label spells out what
    * they count.
    */
   item.accessibilityInformation = {
-    label: `Panorama: ${totalDependencies} dependencies, ${outdated} outdated, ${vulnerable} vulnerable`,
+    label: `Orizzonte: ${totalDependencies} dependencies, ${outdated} outdated, ${vulnerable} vulnerable`,
     role: 'button',
   };
   item.backgroundColor =

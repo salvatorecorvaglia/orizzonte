@@ -734,7 +734,7 @@ export function App() {
         <div className="empty">
           <h2>No dependency manifests found</h2>
           <p>
-            Panorama looks for package.json, pyproject.toml, requirements.txt,
+            Orizzonte looks for package.json, pyproject.toml, requirements.txt,
             Cargo.toml, go.mod, composer.json, pom.xml, build.gradle and
             build.gradle.kts anywhere in this workspace.
           </p>

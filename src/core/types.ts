@@ -223,7 +223,7 @@ export interface ProjectDuplicateVersions extends DuplicateVersionResult {
 
 /** Every package sharing one license, for the workspace-wide license summary. */
 export interface LicenseGroup {
-  /** `undefined` groups every package Panorama could not attribute a license to. */
+  /** `undefined` groups every package Orizzonte could not attribute a license to. */
   license: string | undefined;
   packageNames: string[];
   /** True when this license fails the configured allow/deny policy. */

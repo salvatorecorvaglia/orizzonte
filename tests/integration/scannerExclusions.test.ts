@@ -9,12 +9,12 @@
 
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
-import type { PanoramaApi } from '../../src/extension.js';
+import type { OrizzonteApi } from '../../src/extension.js';
 
-const EXTENSION_ID = 'panorama.panorama-vscode';
+const EXTENSION_ID = 'orizzonte.orizzonte-vscode';
 
-async function getApi(): Promise<PanoramaApi> {
-  const extension = vscode.extensions.getExtension<PanoramaApi>(EXTENSION_ID);
+async function getApi(): Promise<OrizzonteApi> {
+  const extension = vscode.extensions.getExtension<OrizzonteApi>(EXTENSION_ID);
   assert.ok(extension, `Extension ${EXTENSION_ID} was not found`);
   return extension.activate();
 }

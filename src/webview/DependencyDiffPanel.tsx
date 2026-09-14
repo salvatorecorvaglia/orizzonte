@@ -49,7 +49,7 @@ export function DependencyDiffPanel({
   return (
     <section
       className="search-panel"
-      id="panorama-dependency-diff-panel"
+      id="orizzonte-dependency-diff-panel"
       aria-label="Dependency changes"
       onKeyDown={handlePanelKeyDown}
     >
@@ -76,7 +76,7 @@ export function DependencyDiffPanel({
       {unchecked.length > 0 && (
         <div className="banners">
           <div className="callout callout--info" role="status">
-            No lockfile Panorama can diff for{' '}
+            No lockfile Orizzonte can diff for{' '}
             {unchecked.map((id) => ECOSYSTEM_LABELS[id]).join(', ')} projects.
           </div>
         </div>

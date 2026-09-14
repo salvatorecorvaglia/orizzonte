@@ -1,6 +1,6 @@
 # Contributors 👥
 
-A huge thank you to everyone who has contributed to **Panorama**!
+A huge thank you to everyone who has contributed to **Orizzonte**!
 
 ## ✨ Lead Maintainer
 

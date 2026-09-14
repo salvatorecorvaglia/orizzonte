@@ -14,12 +14,12 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { PanoramaApi } from '../../src/extension.js';
+import type { OrizzonteApi } from '../../src/extension.js';
 
-const EXTENSION_ID = 'panorama.panorama-vscode';
+const EXTENSION_ID = 'orizzonte.orizzonte-vscode';
 
-async function getApi(): Promise<PanoramaApi> {
-  const extension = vscode.extensions.getExtension<PanoramaApi>(EXTENSION_ID);
+async function getApi(): Promise<OrizzonteApi> {
+  const extension = vscode.extensions.getExtension<OrizzonteApi>(EXTENSION_ID);
   assert.ok(extension, `Extension ${EXTENSION_ID} was not found`);
   const api = await extension.activate();
   assert.ok(api, 'activate() returned nothing');
@@ -39,13 +39,13 @@ describe('activation', () => {
     const registered = await vscode.commands.getCommands(true);
 
     for (const command of [
-      'panorama.open',
-      'panorama.refresh',
-      'panorama.checkUpdates',
-      'panorama.updateAll',
-      'panorama.searchInstall',
-      'panorama.showWhy',
-      'panorama.focusDependencyFromLens',
+      'orizzonte.open',
+      'orizzonte.refresh',
+      'orizzonte.checkUpdates',
+      'orizzonte.updateAll',
+      'orizzonte.searchInstall',
+      'orizzonte.showWhy',
+      'orizzonte.focusDependencyFromLens',
     ]) {
       assert.ok(registered.includes(command), `${command} was not registered`);
     }
@@ -53,7 +53,7 @@ describe('activation', () => {
 });
 
 describe('scanner discovery', () => {
-  let api: PanoramaApi;
+  let api: OrizzonteApi;
 
   before(async () => {
     api = await getApi();
@@ -207,7 +207,7 @@ describe('scanner discovery', () => {
     assert.equal(result.summary.outdated, 0);
   });
 
-  it('excludes directories listed in panorama.excludeGlobs', async () => {
+  it('excludes directories listed in orizzonte.excludeGlobs', async () => {
     const result = await api.scan({ checkUpdates: false });
     for (const group of result.groups) {
       assert.ok(
@@ -227,12 +227,12 @@ describe('sidebar view', () => {
     await getApi();
     // Focusing the view forces VS Code to instantiate the WebviewViewProvider,
     // which is where a malformed contribution would surface.
-    await vscode.commands.executeCommand('panorama.sidebar.focus');
+    await vscode.commands.executeCommand('orizzonte.sidebar.focus');
   });
 });
 
 describe('commands are safe to invoke', () => {
-  let api: PanoramaApi;
+  let api: OrizzonteApi;
 
   before(async () => {
     api = await getApi();
@@ -250,7 +250,7 @@ describe('commands are safe to invoke', () => {
    */
   it('refresh completes without touching the network', async () => {
     const before = api.requestCount();
-    await vscode.commands.executeCommand('panorama.refresh');
+    await vscode.commands.executeCommand('orizzonte.refresh');
     assert.equal(
       api.requestCount(),
       before,
@@ -260,7 +260,7 @@ describe('commands are safe to invoke', () => {
 
   it('checkUpdates stays offline under the test host', async () => {
     const before = api.requestCount();
-    await vscode.commands.executeCommand('panorama.checkUpdates');
+    await vscode.commands.executeCommand('orizzonte.checkUpdates');
     assert.equal(
       api.requestCount(),
       before,
@@ -276,12 +276,12 @@ describe('commands are safe to invoke', () => {
 
   it('showWhy with no selection does not throw', async () => {
     // Falls back to an informational message rather than failing.
-    await vscode.commands.executeCommand('panorama.showWhy');
+    await vscode.commands.executeCommand('orizzonte.showWhy');
   });
 });
 
 describe('inline dependency feedback', () => {
-  let api: PanoramaApi;
+  let api: OrizzonteApi;
 
   before(async () => {
     api = await getApi();
@@ -310,7 +310,7 @@ describe('inline dependency feedback', () => {
 
   it('focusDependencyFromLens does not throw for an unknown key', async () => {
     await vscode.commands.executeCommand(
-      'panorama.focusDependencyFromLens',
+      'orizzonte.focusDependencyFromLens',
       'no-such-key',
     );
   });
@@ -322,7 +322,7 @@ describe('export report', () => {
     await api.scan({ checkUpdates: false });
 
     const tmpDir = await fs.realpath(
-      await fs.mkdtemp(path.join(os.tmpdir(), 'panorama-export-')),
+      await fs.mkdtemp(path.join(os.tmpdir(), 'orizzonte-export-')),
     );
     const target = vscode.Uri.file(path.join(tmpDir, 'report.md'));
 
@@ -356,9 +356,9 @@ describe('export report', () => {
       undefined) as typeof vscode.window.showInformationMessage;
 
     try {
-      await vscode.commands.executeCommand('panorama.exportReport');
+      await vscode.commands.executeCommand('orizzonte.exportReport');
       const content = await fs.readFile(target.fsPath, 'utf8');
-      assert.match(content, /# Panorama Dependency Report/);
+      assert.match(content, /# Orizzonte Dependency Report/);
       assert.match(content, /## Summary/);
     } finally {
       (

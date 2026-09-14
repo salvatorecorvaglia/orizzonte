@@ -369,7 +369,7 @@ describe('searchMavenCentral encoding', () => {
 });
 
 /**
- * `panorama.registryOverrides` used to only be wired up for Node and Python —
+ * `orizzonte.registryOverrides` used to only be wired up for Node and Python —
  * the other five providers hardcoded their public registry, so a compliance
  * mirror configured for e.g. Cargo silently kept talking to crates.io. One
  * test per provider (plus Maven/Gradle, sharing `mavenCentral.ts`) pins that

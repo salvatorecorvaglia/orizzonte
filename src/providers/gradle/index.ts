@@ -2,7 +2,7 @@
  * Gradle: build.gradle / build.gradle.kts, plus version catalogs.
  *
  * `build.gradle` is a Groovy/Kotlin *program*, not a data file — there is no
- * correct way to read it without executing it. Panorama therefore treats Gradle
+ * correct way to read it without executing it. Orizzonte therefore treats Gradle
  * as read-mostly and is explicit about which declarations it understands:
  *
  *   - `gradle/libs.versions.toml` version catalogs are real TOML and fully

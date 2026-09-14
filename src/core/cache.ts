@@ -2,7 +2,7 @@
  * A TTL cache, optionally persisted in `ExtensionContext.globalState`.
  *
  * Version lookups are cheap to repeat but rude to repeat often, and persisting
- * across reloads is what lets Panorama render instantly on the second open —
+ * across reloads is what lets Orizzonte render instantly on the second open —
  * and render *something* when the machine is offline.
  *
  * Two bounds keep that from turning into a leak. The in-memory mirror is an LRU
@@ -24,7 +24,7 @@ interface Entry<T> {
   expiresAt: number;
 }
 
-const STORAGE_PREFIX = 'panorama.cache.';
+const STORAGE_PREFIX = 'orizzonte.cache.';
 
 /**
  * How many entries the in-memory mirror holds. Comfortably above a large

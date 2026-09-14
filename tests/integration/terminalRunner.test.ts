@@ -15,8 +15,8 @@ import * as os from 'node:os';
 import * as vscode from 'vscode';
 import { TerminalRunner } from '../../src/ui/terminalRunner.js';
 
-function panoramaTerminals(): readonly vscode.Terminal[] {
-  return vscode.window.terminals.filter((t) => t.name === 'Panorama');
+function orizzonteTerminals(): readonly vscode.Terminal[] {
+  return vscode.window.terminals.filter((t) => t.name === 'Orizzonte');
 }
 
 describe('TerminalRunner', () => {
@@ -32,7 +32,7 @@ describe('TerminalRunner', () => {
 
   it('runs a command and reports some exit code (or an honest "unknown")', async () => {
     const result = await runner.run({
-      argv: ['echo', 'panorama-integration-test'],
+      argv: ['echo', 'orizzonte-integration-test'],
       cwd: process.cwd(),
       description: 'test echo',
     });
@@ -43,14 +43,14 @@ describe('TerminalRunner', () => {
     assert.ok(result.exitCode === undefined || result.exitCode === 0);
   });
 
-  it('creates exactly one terminal named "Panorama"', async () => {
+  it('creates exactly one terminal named "Orizzonte"', async () => {
     await runner.run({
       argv: ['echo', 'first'],
       cwd: process.cwd(),
       description: 'test echo',
     });
 
-    assert.equal(panoramaTerminals().length, 1);
+    assert.equal(orizzonteTerminals().length, 1);
   });
 
   it('reuses the same terminal for a second command in the same cwd', async () => {
@@ -59,7 +59,7 @@ describe('TerminalRunner', () => {
       cwd: process.cwd(),
       description: 'test echo',
     });
-    const first = panoramaTerminals()[0];
+    const first = orizzonteTerminals()[0];
 
     await runner.run({
       argv: ['echo', 'second'],
@@ -67,9 +67,9 @@ describe('TerminalRunner', () => {
       description: 'test echo',
     });
 
-    assert.equal(panoramaTerminals().length, 1, 'a second terminal appeared');
+    assert.equal(orizzonteTerminals().length, 1, 'a second terminal appeared');
     assert.equal(
-      panoramaTerminals()[0],
+      orizzonteTerminals()[0],
       first,
       'the same working directory should reuse the terminal instance',
     );
@@ -81,7 +81,7 @@ describe('TerminalRunner', () => {
       cwd: process.cwd(),
       description: 'test echo',
     });
-    const first = panoramaTerminals()[0];
+    const first = orizzonteTerminals()[0];
 
     await runner.run({
       argv: ['echo', 'second'],
@@ -90,12 +90,12 @@ describe('TerminalRunner', () => {
     });
 
     assert.equal(
-      panoramaTerminals().length,
+      orizzonteTerminals().length,
       1,
       'the old terminal for the previous cwd should not linger alongside the new one',
     );
     assert.notEqual(
-      panoramaTerminals()[0],
+      orizzonteTerminals()[0],
       first,
       'a cwd change should have replaced the terminal instance',
     );

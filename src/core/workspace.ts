@@ -49,7 +49,7 @@ export function createProviderContext(
       // so VS Code already withholds any workspace-scoped value here when the
       // workspace is untrusted — this only ever sees a value the user opted into.
       const overrides = vscode.workspace
-        .getConfiguration('panorama')
+        .getConfiguration('orizzonte')
         .get<Record<string, RegistryOverrideValue>>('registryOverrides', {});
       return resolveRegistryOverride(overrides, ecosystem);
     },
@@ -61,13 +61,13 @@ export function createProviderContext(
       // same setting, not a separate one, so it inherits the same trust gate
       // without needing its own entry in restrictedConfigurations.
       const overrides = vscode.workspace
-        .getConfiguration('panorama')
+        .getConfiguration('orizzonte')
         .get<Record<string, RegistryOverrideValue>>('registryOverrides', {});
       return resolveRegistryAuthHeaders(overrides, ecosystem);
     },
 
     preferredToolchain(ecosystem: Ecosystem): string {
-      const config = vscode.workspace.getConfiguration('panorama');
+      const config = vscode.workspace.getConfiguration('orizzonte');
       if (ecosystem === 'node')
         return config.get<string>('preferredNodeManager', 'auto');
       if (ecosystem === 'python')

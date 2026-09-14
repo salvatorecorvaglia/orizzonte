@@ -1,7 +1,7 @@
 /**
  * Vulnerability data from OSV.dev.
  *
- * OSV is the right source here because one API covers every ecosystem Panorama
+ * OSV is the right source here because one API covers every ecosystem Orizzonte
  * supports, and `querybatch` lets a whole project be checked in a couple of
  * round-trips: the batch call returns only IDs, and we fetch full records for
  * the small subset that actually matched.

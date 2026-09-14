@@ -12,10 +12,10 @@
 import type { Ecosystem } from './types.js';
 
 /**
- * One entry in `panorama.registryOverrides`: a bare URL (unauthenticated,
+ * One entry in `orizzonte.registryOverrides`: a bare URL (unauthenticated,
  * the original shape), or a URL plus the name of an environment variable
  * holding a bearer token — never the token itself, which stays out of
- * settings.json and everywhere else Panorama's own state might land.
+ * settings.json and everywhere else Orizzonte's own state might land.
  */
 export type RegistryOverrideValue =
   | string

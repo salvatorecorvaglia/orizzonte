@@ -1,6 +1,6 @@
 /*
  * Every colour here is a VS Code theme variable. Nothing is hardcoded, which is
- * what makes Panorama match light, dark, high-contrast and custom themes with
+ * what makes Orizzonte match light, dark, high-contrast and custom themes with
  * no theme-detection code at all.
  *
  * For the same reason nothing conveys state through `opacity` except `:disabled`
@@ -17,37 +17,37 @@
 
 :root {
   /* Spacing scale. Use these rather than fresh pixel values. */
-  --panorama-space-0: 2px;
-  --panorama-space-1: 4px;
-  --panorama-space-2: 6px;
-  --panorama-space-3: 8px;
-  --panorama-space-4: 12px;
-  --panorama-space-5: 16px;
-  --panorama-space-6: 24px;
-  --panorama-space-7: 40px;
+  --orizzonte-space-0: 2px;
+  --orizzonte-space-1: 4px;
+  --orizzonte-space-2: 6px;
+  --orizzonte-space-3: 8px;
+  --orizzonte-space-4: 12px;
+  --orizzonte-space-5: 16px;
+  --orizzonte-space-6: 24px;
+  --orizzonte-space-7: 40px;
 
   /* Type scale, relative to the editor font size the user chose. */
-  --panorama-text-xs: 0.8em;
-  --panorama-text-sm: 0.85em;
-  --panorama-text-md: 0.92em;
-  --panorama-text-lg: 1.15em;
+  --orizzonte-text-xs: 0.8em;
+  --orizzonte-text-sm: 0.85em;
+  --orizzonte-text-md: 0.92em;
+  --orizzonte-text-lg: 1.15em;
 
-  --panorama-gap: var(--panorama-space-4);
-  --panorama-radius: 4px;
+  --orizzonte-gap: var(--orizzonte-space-4);
+  --orizzonte-radius: 4px;
   /*
    * Control metrics rather than spacing-scale steps: these are tuned so inputs,
    * selects and buttons land on the same height as VS Code's own controls, and
    * that height is not a multiple of the layout rhythm. Named so they are still
    * changed in one place.
    */
-  --panorama-cell-pad: 10px;
-  --panorama-control-pad-y: 5px;
-  --panorama-control-pad-y-sm: 3px;
-  --panorama-drawer-width: 380px;
+  --orizzonte-cell-pad: 10px;
+  --orizzonte-control-pad-y: 5px;
+  --orizzonte-control-pad-y-sm: 3px;
+  --orizzonte-drawer-width: 380px;
 
   /* Control widths, so the values the layout depends on are named once. */
-  --panorama-search-min-width: 180px;
-  --panorama-name-min-width: 140px;
+  --orizzonte-search-min-width: 180px;
+  --orizzonte-name-min-width: 140px;
 
   /*
    * Fixed control sizes. Not layout rhythm, so deliberately not forced onto
@@ -55,12 +55,12 @@
    * which is how four different dot sizes and three different tile radii got
    * into this file in the first place.
    */
-  --panorama-logo-size: 32px;
-  --panorama-checkbox-size: 15px;
-  --panorama-dot-size: 7px;
+  --orizzonte-logo-size: 32px;
+  --orizzonte-checkbox-size: 15px;
+  --orizzonte-dot-size: 7px;
 
   /* Font monospaziato per versioni e dimensioni */
-  --panorama-font-mono: var(
+  --orizzonte-font-mono: var(
     --vscode-editor-font-family,
     ui-monospace,
     SFMono-Regular,
@@ -78,7 +78,7 @@
    * Laid out as a flex row, Remove slid left on every row that had no update
    * to offer, so a column of destructive buttons never shared an x-axis. Each
    * action now owns a fixed slot and the actions column is the sum of them,
-   * which is what keeps `--panorama-table-min-width` below derived rather
+   * which is what keeps `--orizzonte-table-min-width` below derived rather
    * than restated.
    *
    * The cell's own horizontal padding is part of that sum: `box-sizing` is
@@ -88,13 +88,13 @@
    * a visible one. At 8em a slot still fits "Remove" with its icon and
    * padding, and the total comes to the same 18em the column had before.
    */
-  --panorama-action-slot: 8em;
-  --panorama-actions-width: calc(
+  --orizzonte-action-slot: 8em;
+  --orizzonte-actions-width: calc(
     2 *
-    var(--panorama-action-slot) +
-    var(--panorama-space-2) +
+    var(--orizzonte-action-slot) +
+    var(--orizzonte-space-2) +
     2 *
-    var(--panorama-cell-pad)
+    var(--orizzonte-cell-pad)
   );
 
   /*
@@ -105,7 +105,7 @@
    * breakpoints below drop columns and lower this to match, which is the whole
    * reason it is a variable.
    */
-  --panorama-table-min-width: calc(656px + var(--panorama-actions-width));
+  --orizzonte-table-min-width: calc(656px + var(--orizzonte-actions-width));
 
   /*
    * The column tracks, as a variable because hiding a column is not enough on
@@ -117,21 +117,21 @@
    * against a track a fifth of the width they need. Each breakpoint therefore
    * restates the tracks it still has.
    */
-  --panorama-table-columns: minmax(var(--panorama-name-min-width), 1fr) 90px
-    110px 130px 90px 96px var(--panorama-actions-width);
+  --orizzonte-table-columns: minmax(var(--orizzonte-name-min-width), 1fr) 90px
+    110px 130px 90px 96px var(--orizzonte-actions-width);
   /* Pill radius: large enough that any control height rounds to a capsule. */
-  --panorama-radius-pill: 999px;
+  --orizzonte-radius-pill: 999px;
   /*
    * For surfaces bigger than a control — the toolbar's logo tile. A scale of
    * two radii plus the pill, rather than the 4px/6px/8px/12px/16px spread that
    * had accumulated across this file and the Activity Bar view.
    */
-  --panorama-radius-lg: 8px;
+  --orizzonte-radius-lg: 8px;
 
   /* Overwritten from main.tsx so the virtualizer and the stylesheet cannot
      disagree about row geometry. The values here are the fallback. */
-  --panorama-row-height: 34px;
-  --panorama-group-height: 40px;
+  --orizzonte-row-height: 34px;
+  --orizzonte-group-height: 40px;
 
   /*
    * The severity map: the one definition of what each state looks like, built
@@ -148,11 +148,11 @@
    * behind, the Status badge and the Latest column then went yellow for
    * entirely different reasons.
    */
-  --panorama-severity-vuln: var(--vscode-charts-red);
-  --panorama-severity-deprecated: var(--vscode-charts-purple);
-  --panorama-severity-major: var(--vscode-charts-orange);
-  --panorama-severity-minor: var(--vscode-charts-yellow);
-  --panorama-severity-patch: var(--vscode-charts-blue);
+  --orizzonte-severity-vuln: var(--vscode-charts-red);
+  --orizzonte-severity-deprecated: var(--vscode-charts-purple);
+  --orizzonte-severity-major: var(--vscode-charts-orange);
+  --orizzonte-severity-minor: var(--vscode-charts-yellow);
+  --orizzonte-severity-patch: var(--vscode-charts-blue);
 
   /*
    * The *change* vocabulary, deliberately not the severity ramp.
@@ -165,9 +165,9 @@
    * colours and a neutral. Nothing here feeds the Status badge or the Latest
    * column, which stay on the ramp.
    */
-  --panorama-diff-added: var(--vscode-charts-green);
-  --panorama-diff-changed: var(--vscode-charts-blue);
-  --panorama-diff-removed: var(--vscode-descriptionForeground);
+  --orizzonte-diff-added: var(--vscode-charts-green);
+  --orizzonte-diff-changed: var(--vscode-charts-blue);
+  --orizzonte-diff-removed: var(--vscode-descriptionForeground);
 }
 
 * {
@@ -249,8 +249,8 @@ body {
  * full-size icon would tower over the label it belongs to.
  */
 .codicon.table__sort {
-  font-size: var(--panorama-text-md);
-  margin-left: var(--panorama-space-1);
+  font-size: var(--orizzonte-text-md);
+  margin-left: var(--orizzonte-space-1);
 }
 
 /* ---------- Toolbar ---------- */
@@ -258,8 +258,8 @@ body {
 .toolbar {
   display: flex;
   flex-direction: column;
-  gap: var(--panorama-space-3);
-  padding: var(--panorama-gap);
+  gap: var(--orizzonte-space-3);
+  padding: var(--orizzonte-gap);
   border-bottom: 1px solid var(--vscode-panel-border);
   background-color: var(--vscode-editor-background);
 }
@@ -267,13 +267,13 @@ body {
 .toolbar__row {
   display: flex;
   align-items: center;
-  gap: var(--panorama-space-3);
+  gap: var(--orizzonte-space-3);
   flex-wrap: wrap;
 }
 
 .toolbar__search {
   flex: 1;
-  min-width: var(--panorama-search-min-width);
+  min-width: var(--orizzonte-search-min-width);
 }
 
 /* A labelled cluster of related filter chips. */
@@ -301,7 +301,7 @@ body {
 .toolbar__chips {
   display: flex;
   align-items: center;
-  gap: var(--panorama-space-2);
+  gap: var(--orizzonte-space-2);
   flex-wrap: wrap;
 }
 
@@ -311,8 +311,8 @@ body {
  */
 .toolbar__legend {
   padding: 0;
-  margin-bottom: var(--panorama-space-0);
-  font-size: var(--panorama-text-xs);
+  margin-bottom: var(--orizzonte-space-0);
+  font-size: var(--orizzonte-text-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--vscode-descriptionForeground);
@@ -325,13 +325,13 @@ body {
  */
 .toolbar__group--divided {
   border-left: 1px solid var(--vscode-panel-border);
-  padding-left: var(--panorama-gap);
+  padding-left: var(--orizzonte-gap);
 }
 
 .toolbar__summary {
   display: flex;
-  gap: var(--panorama-space-4);
-  font-size: var(--panorama-text-md);
+  gap: var(--orizzonte-space-4);
+  font-size: var(--orizzonte-text-md);
   color: var(--vscode-descriptionForeground);
   align-items: center;
 }
@@ -348,11 +348,11 @@ body {
 .field {
   display: flex;
   flex-direction: column;
-  gap: var(--panorama-space-0);
+  gap: var(--orizzonte-space-0);
 }
 
 .field__label {
-  font-size: var(--panorama-text-xs);
+  font-size: var(--orizzonte-text-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--vscode-descriptionForeground);
@@ -368,8 +368,8 @@ select {
   color: var(--vscode-input-foreground);
   background-color: var(--vscode-input-background);
   border: 1px solid var(--vscode-input-border, transparent);
-  border-radius: var(--panorama-radius);
-  padding: var(--panorama-control-pad-y) var(--panorama-space-3);
+  border-radius: var(--orizzonte-radius);
+  padding: var(--orizzonte-control-pad-y) var(--orizzonte-space-3);
   width: 100%;
 }
 
@@ -396,8 +396,8 @@ button {
   color: var(--vscode-button-foreground);
   background-color: var(--vscode-button-background);
   border: 1px solid var(--vscode-button-border, transparent);
-  border-radius: var(--panorama-radius);
-  padding: var(--panorama-control-pad-y) var(--panorama-space-4);
+  border-radius: var(--orizzonte-radius);
+  padding: var(--orizzonte-control-pad-y) var(--orizzonte-space-4);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -425,7 +425,7 @@ button.ghost {
   background: transparent;
   color: var(--vscode-foreground);
   border-color: transparent;
-  padding: var(--panorama-control-pad-y-sm) var(--panorama-space-3);
+  padding: var(--orizzonte-control-pad-y-sm) var(--orizzonte-space-3);
 }
 
 button.ghost:hover:not(:disabled) {
@@ -447,7 +447,7 @@ button.danger:hover:not(:disabled) {
 button.danger.ghost {
   border-color: transparent;
   color: var(--vscode-errorForeground);
-  padding: var(--panorama-control-pad-y-sm) var(--panorama-space-3);
+  padding: var(--orizzonte-control-pad-y-sm) var(--orizzonte-space-3);
 }
 
 /* ---------- Filter chips ---------- */
@@ -456,9 +456,9 @@ button.danger.ghost {
   border: 1px solid var(--vscode-panel-border);
   background-color: transparent;
   color: var(--vscode-descriptionForeground);
-  border-radius: var(--panorama-radius-pill);
-  padding: var(--panorama-space-0) var(--panorama-space-3);
-  font-size: var(--panorama-text-sm);
+  border-radius: var(--orizzonte-radius-pill);
+  padding: var(--orizzonte-space-0) var(--orizzonte-space-3);
+  font-size: var(--orizzonte-text-sm);
   cursor: pointer;
 }
 
@@ -510,8 +510,8 @@ button.danger.ghost {
 .table__header,
 .row {
   display: grid;
-  grid-template-columns: var(--panorama-table-columns);
-  min-width: var(--panorama-table-min-width);
+  grid-template-columns: var(--orizzonte-table-columns);
+  min-width: var(--orizzonte-table-min-width);
   align-items: center;
 }
 
@@ -532,7 +532,7 @@ button.danger.ghost {
 .table__header {
   background-color: var(--vscode-editor-background);
   border-bottom: 1px solid var(--vscode-panel-border);
-  font-size: var(--panorama-text-sm);
+  font-size: var(--orizzonte-text-sm);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--vscode-descriptionForeground);
@@ -570,7 +570,7 @@ button.danger.ghost {
 }
 
 .table__group {
-  height: var(--panorama-group-height);
+  height: var(--orizzonte-group-height);
   font-weight: 600;
   background-color: var(--vscode-editor-background);
   border-bottom: 1px solid var(--vscode-panel-border);
@@ -579,15 +579,15 @@ button.danger.ghost {
 .table__group-cell {
   display: flex;
   align-items: center;
-  gap: var(--panorama-cell-pad);
+  gap: var(--orizzonte-cell-pad);
   height: 100%;
-  padding: 0 var(--panorama-gap);
+  padding: 0 var(--orizzonte-gap);
 }
 
 .table__group-meta {
   font-weight: normal;
   color: var(--vscode-descriptionForeground);
-  font-size: var(--panorama-text-md);
+  font-size: var(--orizzonte-text-md);
 }
 
 .table__group-spacer {
@@ -595,7 +595,7 @@ button.danger.ghost {
 }
 
 .row {
-  height: var(--panorama-row-height);
+  height: var(--orizzonte-row-height);
   border-bottom: 1px solid var(--vscode-editorGroup-border, transparent);
   cursor: pointer;
 }
@@ -626,7 +626,7 @@ button.danger.ghost {
 }
 
 .cell {
-  padding: 0 var(--panorama-cell-pad);
+  padding: 0 var(--orizzonte-cell-pad);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -642,22 +642,22 @@ button.danger.ghost {
  * sortable or not.
  */
 .table__header .cell {
-  padding: var(--panorama-space-3) var(--panorama-cell-pad);
+  padding: var(--orizzonte-space-3) var(--orizzonte-cell-pad);
   font-family: var(--vscode-font-family);
-  font-size: var(--panorama-text-sm);
+  font-size: var(--orizzonte-text-sm);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 600;
 }
 
 .cell--name {
-  gap: var(--panorama-space-2);
+  gap: var(--orizzonte-space-2);
 }
 
 .table__header-name-wrapper {
   display: flex;
   align-items: center;
-  gap: var(--panorama-space-2);
+  gap: var(--orizzonte-space-2);
   width: 100%;
   overflow: hidden;
 }
@@ -697,8 +697,8 @@ button.danger.ghost {
  */
 .cell--actions {
   display: grid;
-  grid-template-columns: repeat(2, var(--panorama-action-slot));
-  gap: var(--panorama-space-2);
+  grid-template-columns: repeat(2, var(--orizzonte-action-slot));
+  gap: var(--orizzonte-space-2);
   align-items: center;
 }
 
@@ -734,8 +734,8 @@ button.danger.ghost {
 .row .cell--version,
 .row .cell--latest,
 .row .cell--size {
-  font-family: var(--panorama-font-mono);
-  font-size: var(--panorama-text-sm);
+  font-family: var(--orizzonte-font-mono);
+  font-size: var(--orizzonte-text-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -743,10 +743,10 @@ button.danger.ghost {
 
 .badge {
   display: inline-block;
-  padding: var(--panorama-space-0) var(--panorama-space-2);
+  padding: var(--orizzonte-space-0) var(--orizzonte-space-2);
   border: 1px solid transparent;
-  border-radius: var(--panorama-radius-pill);
-  font-size: var(--panorama-text-xs);
+  border-radius: var(--orizzonte-radius-pill);
+  font-size: var(--orizzonte-text-xs);
   background-color: var(--vscode-badge-background);
   color: var(--vscode-badge-foreground);
 }
@@ -785,11 +785,11 @@ button.danger.ghost {
 }
 
 .severity--deprecated {
-  color: var(--panorama-severity-deprecated);
+  color: var(--orizzonte-severity-deprecated);
 }
 
 .severity--vuln {
-  color: var(--panorama-severity-vuln);
+  color: var(--orizzonte-severity-vuln);
 }
 
 /*
@@ -799,7 +799,7 @@ button.danger.ghost {
  * `callout--warn` banner already uses for the same state.
  */
 .severity--flagged {
-  color: var(--panorama-severity-deprecated);
+  color: var(--orizzonte-severity-deprecated);
 }
 
 .muted {
@@ -809,11 +809,11 @@ button.danger.ghost {
 /* ---------- Drawer ---------- */
 
 .drawer {
-  width: var(--panorama-drawer-width);
+  width: var(--orizzonte-drawer-width);
   flex-shrink: 0;
   border-left: 1px solid var(--vscode-panel-border);
   overflow-y: auto;
-  padding: var(--panorama-gap);
+  padding: var(--orizzonte-gap);
   background-color: var(
     --vscode-sideBar-background,
     var(--vscode-editor-background)
@@ -828,13 +828,13 @@ button.danger.ghost {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--panorama-space-3);
-  margin-bottom: var(--panorama-space-1);
+  gap: var(--orizzonte-space-3);
+  margin-bottom: var(--orizzonte-space-1);
 }
 
 .drawer__title h2 {
   margin: 0;
-  font-size: var(--panorama-text-lg);
+  font-size: var(--orizzonte-text-lg);
   word-break: break-all;
 }
 
@@ -844,7 +844,7 @@ button.danger.ghost {
 }
 
 .drawer__subtitle {
-  margin-bottom: var(--panorama-gap);
+  margin-bottom: var(--orizzonte-gap);
 }
 
 .drawer__desc {
@@ -852,28 +852,28 @@ button.danger.ghost {
 }
 
 .drawer__action {
-  margin-top: var(--panorama-cell-pad);
+  margin-top: var(--orizzonte-cell-pad);
 }
 
 .drawer__why-source {
-  margin-bottom: var(--panorama-space-3);
-  font-size: var(--panorama-text-md);
+  margin-bottom: var(--orizzonte-space-3);
+  font-size: var(--orizzonte-text-md);
 }
 
 .drawer__links {
   display: flex;
-  gap: var(--panorama-gap);
-  margin-top: var(--panorama-cell-pad);
+  gap: var(--orizzonte-gap);
+  margin-top: var(--orizzonte-cell-pad);
   flex-wrap: wrap;
 }
 
 .drawer section {
-  margin-top: var(--panorama-space-5);
+  margin-top: var(--orizzonte-space-5);
 }
 
 .drawer h3 {
-  margin: 0 0 var(--panorama-space-2);
-  font-size: var(--panorama-text-sm);
+  margin: 0 0 var(--orizzonte-space-2);
+  font-size: var(--orizzonte-text-sm);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--vscode-descriptionForeground);
@@ -883,8 +883,8 @@ button.danger.ghost {
   margin: 0;
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: var(--panorama-space-1) var(--panorama-gap);
-  font-size: var(--panorama-text-md);
+  gap: var(--orizzonte-space-1) var(--orizzonte-gap);
+  font-size: var(--orizzonte-text-md);
 }
 
 .drawer dt {
@@ -899,7 +899,7 @@ button.danger.ghost {
 .changelog {
   display: flex;
   flex-direction: column;
-  gap: var(--panorama-space-4);
+  gap: var(--orizzonte-space-4);
   /* Long release notes should scroll within the drawer, not push the rest of
      it out of reach. */
   max-height: 320px;
@@ -908,20 +908,20 @@ button.danger.ghost {
 
 .changelog__entry {
   border-left: 2px solid var(--vscode-panel-border);
-  padding-left: var(--panorama-space-3);
+  padding-left: var(--orizzonte-space-3);
 }
 
 .changelog__entry-header {
   display: flex;
   align-items: baseline;
-  gap: var(--panorama-space-2);
+  gap: var(--orizzonte-space-2);
   font-weight: 600;
 }
 
 .changelog__entry-body {
-  margin-top: var(--panorama-space-1);
+  margin-top: var(--orizzonte-space-1);
   color: var(--vscode-descriptionForeground);
-  font-size: var(--panorama-text-md);
+  font-size: var(--orizzonte-text-md);
   /* Release notes are plain text, verbatim from the maintainer — this is
      what lets their own line breaks and lists still read as such. */
   white-space: pre-wrap;
@@ -948,24 +948,24 @@ a:hover,
 /* ---------- Banners & callouts ---------- */
 
 .callout {
-  padding: var(--panorama-space-3) var(--panorama-cell-pad);
-  border-radius: var(--panorama-radius);
+  padding: var(--orizzonte-space-3) var(--orizzonte-cell-pad);
+  border-radius: var(--orizzonte-radius);
   border-left: 3px solid;
-  font-size: var(--panorama-text-md);
-  margin-bottom: var(--panorama-space-3);
+  font-size: var(--orizzonte-text-md);
+  margin-bottom: var(--orizzonte-space-3);
 }
 
 .callout__line {
-  margin-top: var(--panorama-space-1);
+  margin-top: var(--orizzonte-space-1);
 }
 
 .callout__aliases {
-  margin-top: var(--panorama-space-1);
-  font-size: var(--panorama-text-md);
+  margin-top: var(--orizzonte-space-1);
+  font-size: var(--orizzonte-text-md);
 }
 
 .callout--warn {
-  border-color: var(--panorama-severity-deprecated);
+  border-color: var(--orizzonte-severity-deprecated);
   background-color: var(--vscode-inputValidation-warningBackground);
   color: var(
     --vscode-inputValidation-warningForeground,
@@ -974,7 +974,7 @@ a:hover,
 }
 
 .callout--error {
-  border-color: var(--panorama-severity-vuln);
+  border-color: var(--orizzonte-severity-vuln);
   background-color: var(--vscode-inputValidation-errorBackground);
   color: var(
     --vscode-inputValidation-errorForeground,
@@ -983,7 +983,7 @@ a:hover,
 }
 
 .callout--info {
-  border-color: var(--panorama-severity-patch);
+  border-color: var(--orizzonte-severity-patch);
   background-color: var(--vscode-textBlockQuote-background);
 }
 
@@ -997,56 +997,56 @@ a:hover,
  * callout that is already coloured.
  */
 .severity-critical {
-  border-color: var(--panorama-severity-vuln);
+  border-color: var(--orizzonte-severity-vuln);
 }
 
 .severity-high {
-  border-color: var(--panorama-severity-major);
+  border-color: var(--orizzonte-severity-major);
 }
 
 .severity-moderate {
-  border-color: var(--panorama-severity-deprecated);
+  border-color: var(--orizzonte-severity-deprecated);
 }
 
 .severity-low {
-  border-color: var(--panorama-severity-patch);
+  border-color: var(--orizzonte-severity-patch);
 }
 
 .severity-dot {
   display: inline-block;
-  width: var(--panorama-space-3);
-  height: var(--panorama-space-3);
-  border-radius: var(--panorama-radius-pill);
-  margin-right: var(--panorama-space-2);
+  width: var(--orizzonte-space-3);
+  height: var(--orizzonte-space-3);
+  border-radius: var(--orizzonte-radius-pill);
+  margin-right: var(--orizzonte-space-2);
   vertical-align: baseline;
   background-color: currentcolor;
 }
 
 .severity-critical .severity-dot {
-  color: var(--panorama-severity-vuln);
+  color: var(--orizzonte-severity-vuln);
 }
 
 .severity-high .severity-dot {
-  color: var(--panorama-severity-major);
+  color: var(--orizzonte-severity-major);
 }
 
 .severity-moderate .severity-dot {
-  color: var(--panorama-severity-deprecated);
+  color: var(--orizzonte-severity-deprecated);
 }
 
 .severity-low .severity-dot {
-  color: var(--panorama-severity-patch);
+  color: var(--orizzonte-severity-patch);
 }
 
 /* App-level banners: a callout plus a dismiss control. */
 .banners {
-  padding: var(--panorama-gap) var(--panorama-gap) 0;
+  padding: var(--orizzonte-gap) var(--orizzonte-gap) 0;
 }
 
 .banner {
   display: flex;
   align-items: flex-start;
-  gap: var(--panorama-space-3);
+  gap: var(--orizzonte-space-3);
 }
 
 .banner__text {
@@ -1058,14 +1058,14 @@ a:hover,
 
 .tree {
   font-family: var(--vscode-editor-font-family);
-  font-size: var(--panorama-text-md);
+  font-size: var(--orizzonte-text-md);
   line-height: 1.6;
 }
 
 .tree ul {
   list-style: none;
   margin: 0;
-  padding-left: var(--panorama-space-5);
+  padding-left: var(--orizzonte-space-5);
   border-left: 1px solid var(--vscode-tree-indentGuidesStroke);
 }
 
@@ -1085,8 +1085,8 @@ a:hover,
 .search-result {
   display: flex;
   align-items: center;
-  gap: var(--panorama-cell-pad);
-  padding: var(--panorama-space-3) var(--panorama-gap);
+  gap: var(--orizzonte-cell-pad);
+  padding: var(--orizzonte-space-3) var(--orizzonte-gap);
   border-bottom: 1px solid var(--vscode-editorGroup-border, transparent);
 }
 
@@ -1103,12 +1103,12 @@ a:hover,
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: var(--panorama-space-3);
+  gap: var(--orizzonte-space-3);
 }
 
 .search-result__desc {
   color: var(--vscode-descriptionForeground);
-  font-size: var(--panorama-text-md);
+  font-size: var(--orizzonte-text-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1116,19 +1116,19 @@ a:hover,
 
 .search-result__elsewhere {
   color: var(--vscode-descriptionForeground);
-  font-size: var(--panorama-text-sm);
+  font-size: var(--orizzonte-text-sm);
 }
 
 .search-result__actions {
   display: flex;
-  gap: var(--panorama-space-2);
+  gap: var(--orizzonte-space-2);
   align-items: center;
 }
 
 /* ---------- Empty & loading states ---------- */
 
 .empty {
-  padding: var(--panorama-space-7) var(--panorama-space-6);
+  padding: var(--orizzonte-space-7) var(--orizzonte-space-6);
   text-align: center;
   color: var(--vscode-descriptionForeground);
 }
@@ -1139,23 +1139,23 @@ a:hover,
  * the same box reads as a layout bug.
  */
 .empty--inline {
-  padding: var(--panorama-space-5) var(--panorama-space-6);
+  padding: var(--orizzonte-space-5) var(--orizzonte-space-6);
 }
 
 .empty h2 {
   color: var(--vscode-foreground);
-  font-size: var(--panorama-text-lg);
-  margin-bottom: var(--panorama-space-2);
+  font-size: var(--orizzonte-text-lg);
+  margin-bottom: var(--orizzonte-space-2);
 }
 
 .empty__action {
-  margin-top: var(--panorama-gap);
+  margin-top: var(--orizzonte-gap);
 }
 
 /* Two actions sit side by side: rescan, and search the registries anyway. */
 .empty__actions {
   display: flex;
-  gap: var(--panorama-space-2);
+  gap: var(--orizzonte-space-2);
   justify-content: center;
 }
 
@@ -1163,7 +1163,7 @@ a:hover,
 .drawer__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--panorama-space-2);
+  gap: var(--orizzonte-space-2);
 }
 
 .progress {
@@ -1297,9 +1297,9 @@ a:hover,
 @media (max-width: 1000px) {
   :root {
     /* Less the 90px Size column, in both the tracks and the floor. */
-    --panorama-table-columns: minmax(var(--panorama-name-min-width), 1fr) 90px
-      110px 130px 96px var(--panorama-actions-width);
-    --panorama-table-min-width: calc(566px + var(--panorama-actions-width));
+    --orizzonte-table-columns: minmax(var(--orizzonte-name-min-width), 1fr) 90px
+      110px 130px 96px var(--orizzonte-actions-width);
+    --orizzonte-table-min-width: calc(566px + var(--orizzonte-actions-width));
   }
 
   .cell--size {
@@ -1320,11 +1320,11 @@ a:hover,
  */
 @media (max-width: 720px) {
   :root {
-    --panorama-table-columns: minmax(var(--panorama-name-min-width), 1fr) 110px
-      130px 96px var(--panorama-actions-width);
-    --panorama-table-min-width: calc(476px + var(--panorama-actions-width));
+    --orizzonte-table-columns: minmax(var(--orizzonte-name-min-width), 1fr)
+      110px 130px 96px var(--orizzonte-actions-width);
+    --orizzonte-table-min-width: calc(476px + var(--orizzonte-actions-width));
     /* Icon plus its padding, rather than icon plus a word. */
-    --panorama-action-slot: 3em;
+    --orizzonte-action-slot: 3em;
   }
 
   .cell--scope {
@@ -1356,7 +1356,7 @@ a:hover,
     right: 0;
     bottom: 0;
     /* Never wider than the panel itself. */
-    width: min(var(--panorama-drawer-width), 100%);
+    width: min(var(--orizzonte-drawer-width), 100%);
     /*
      * Above `.table__bulk-bar`, which is z-index 50.
      *
@@ -1390,8 +1390,8 @@ a:hover,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: var(--panorama-space-3);
-  margin-bottom: var(--panorama-space-1);
+  padding-bottom: var(--orizzonte-space-3);
+  margin-bottom: var(--orizzonte-space-1);
   border-bottom: 1px solid var(--vscode-panel-border);
 }
 
@@ -1399,22 +1399,22 @@ a:hover,
 .toolbar__header-actions {
   display: flex;
   align-items: center;
-  gap: var(--panorama-space-2);
+  gap: var(--orizzonte-space-2);
 }
 
 .toolbar__branding {
   display: flex;
   align-items: center;
-  gap: var(--panorama-space-3);
+  gap: var(--orizzonte-space-3);
 }
 
 .toolbar__logo-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--panorama-logo-size);
-  height: var(--panorama-logo-size);
-  border-radius: var(--panorama-radius-lg);
+  width: var(--orizzonte-logo-size);
+  height: var(--orizzonte-logo-size);
+  border-radius: var(--orizzonte-radius-lg);
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
   font-size: 1.15em;
@@ -1423,7 +1423,7 @@ a:hover,
 .toolbar__title-group {
   display: flex;
   flex-direction: column;
-  gap: var(--panorama-space-0);
+  gap: var(--orizzonte-space-0);
 }
 
 /*
@@ -1444,16 +1444,16 @@ a:hover,
 .toolbar__env-pills {
   display: flex;
   align-items: center;
-  gap: var(--panorama-space-2);
-  font-size: var(--panorama-text-xs);
+  gap: var(--orizzonte-space-2);
+  font-size: var(--orizzonte-text-xs);
 }
 
 .env-pill {
   display: inline-flex;
   align-items: center;
-  gap: var(--panorama-space-1);
-  padding: var(--panorama-space-0) var(--panorama-space-3);
-  border-radius: var(--panorama-radius-pill);
+  gap: var(--orizzonte-space-1);
+  padding: var(--orizzonte-space-0) var(--orizzonte-space-3);
+  border-radius: var(--orizzonte-radius-pill);
   background-color: var(--vscode-badge-background);
   color: var(--vscode-badge-foreground);
   font-weight: 500;
@@ -1482,9 +1482,9 @@ a:hover,
 }
 
 .btn-update-primary {
-  padding: var(--panorama-control-pad-y-sm) var(--panorama-space-3);
-  font-size: var(--panorama-text-sm);
-  border-radius: var(--panorama-radius);
+  padding: var(--orizzonte-control-pad-y-sm) var(--orizzonte-space-3);
+  font-size: var(--orizzonte-text-sm);
+  border-radius: var(--orizzonte-radius);
 }
 
 .btn-accent {
@@ -1496,8 +1496,8 @@ a:hover,
 /* Row Checkbox & Selection */
 
 .row-checkbox {
-  width: var(--panorama-checkbox-size);
-  height: var(--panorama-checkbox-size);
+  width: var(--orizzonte-checkbox-size);
+  height: var(--orizzonte-checkbox-size);
   cursor: pointer;
   accent-color: var(--vscode-button-background);
 }
@@ -1521,17 +1521,17 @@ a:hover,
 
 .table__bulk-bar {
   position: absolute;
-  bottom: var(--panorama-space-5);
+  bottom: var(--orizzonte-space-5);
   left: 50%;
   transform: translateX(-50%);
   z-index: 50;
   display: flex;
   align-items: center;
-  gap: var(--panorama-space-4);
-  padding: var(--panorama-space-2) var(--panorama-space-4);
+  gap: var(--orizzonte-space-4);
+  padding: var(--orizzonte-space-2) var(--orizzonte-space-4);
   background-color: var(--vscode-editorWidget-background);
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  border-radius: var(--panorama-radius-pill);
+  border-radius: var(--orizzonte-radius-pill);
   /*
    * Centred and absolutely positioned, so without a ceiling it grows past both
    * edges of the panel at once and `.app`'s `overflow: hidden` clips the ends —
@@ -1539,7 +1539,7 @@ a:hover,
    * the widths the breakpoints below exist to serve. Wrapping is the fallback
    * for the narrowest case, once the 720px rule has already dropped the labels.
    */
-  max-width: calc(100% - 2 * var(--panorama-space-5));
+  max-width: calc(100% - 2 * var(--orizzonte-space-5));
   flex-wrap: wrap;
   justify-content: center;
   /*
@@ -1559,11 +1559,11 @@ a:hover,
  * a gap that is always there.
  */
 .table__wrapper--bulk .table {
-  padding-bottom: calc(var(--panorama-space-7) + var(--panorama-space-5));
+  padding-bottom: calc(var(--orizzonte-space-7) + var(--orizzonte-space-5));
 }
 
 .table__bulk-info {
-  font-size: var(--panorama-text-sm);
+  font-size: var(--orizzonte-text-sm);
   color: var(--vscode-foreground);
   white-space: nowrap;
 }
@@ -1571,27 +1571,27 @@ a:hover,
 .table__bulk-actions {
   display: flex;
   align-items: center;
-  gap: var(--panorama-space-2);
+  gap: var(--orizzonte-space-2);
 }
 
 /* KPI Summary Cards & Dots in Toolbar */
 .toolbar__kpi {
   display: inline-flex;
   align-items: center;
-  gap: var(--panorama-space-2);
-  padding: var(--panorama-control-pad-y-sm) var(--panorama-cell-pad);
-  border-radius: var(--panorama-radius-pill);
+  gap: var(--orizzonte-space-2);
+  padding: var(--orizzonte-control-pad-y-sm) var(--orizzonte-cell-pad);
+  border-radius: var(--orizzonte-radius-pill);
   background-color: var(--vscode-badge-background);
   color: var(--vscode-badge-foreground);
-  font-size: var(--panorama-text-xs);
+  font-size: var(--orizzonte-text-xs);
   font-weight: 500;
   border: 1px solid var(--vscode-panel-border);
 }
 
 .kpi-dot {
-  width: var(--panorama-dot-size);
-  height: var(--panorama-dot-size);
-  border-radius: var(--panorama-radius-pill);
+  width: var(--orizzonte-dot-size);
+  height: var(--orizzonte-dot-size);
+  border-radius: var(--orizzonte-radius-pill);
   display: inline-block;
   flex-shrink: 0;
 }
@@ -1601,24 +1601,24 @@ a:hover,
 }
 
 .chip__dot {
-  width: var(--panorama-dot-size);
-  height: var(--panorama-dot-size);
-  border-radius: var(--panorama-radius-pill);
+  width: var(--orizzonte-dot-size);
+  height: var(--orizzonte-dot-size);
+  border-radius: var(--orizzonte-radius-pill);
   display: inline-block;
-  margin-right: var(--panorama-space-1);
+  margin-right: var(--orizzonte-space-1);
   vertical-align: middle;
 }
 
 .chip__dot--outdated {
-  background-color: var(--panorama-severity-major);
+  background-color: var(--orizzonte-severity-major);
 }
 
 .chip__dot--vulnerable {
-  background-color: var(--panorama-severity-vuln);
+  background-color: var(--orizzonte-severity-vuln);
 }
 
 .chip__dot--deprecated {
-  background-color: var(--panorama-severity-deprecated);
+  background-color: var(--orizzonte-severity-deprecated);
 }
 
 /*
@@ -1626,7 +1626,7 @@ a:hover,
  * Tabular figures so a column of chips does not jitter as the numbers change.
  */
 .chip__count {
-  margin-left: var(--panorama-space-2);
+  margin-left: var(--orizzonte-space-2);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -1643,46 +1643,46 @@ a:hover,
 }
 
 .badge--patch {
-  color: var(--panorama-severity-patch);
+  color: var(--orizzonte-severity-patch);
   background-color: color-mix(
     in srgb,
-    var(--panorama-severity-patch) 12%,
+    var(--orizzonte-severity-patch) 12%,
     transparent
   );
 }
 
 .badge--minor {
-  color: var(--panorama-severity-minor);
+  color: var(--orizzonte-severity-minor);
   background-color: color-mix(
     in srgb,
-    var(--panorama-severity-minor) 12%,
+    var(--orizzonte-severity-minor) 12%,
     transparent
   );
 }
 
 .badge--major {
-  color: var(--panorama-severity-major);
+  color: var(--orizzonte-severity-major);
   background-color: color-mix(
     in srgb,
-    var(--panorama-severity-major) 14%,
+    var(--orizzonte-severity-major) 14%,
     transparent
   );
 }
 
 .badge--vuln {
-  color: var(--panorama-severity-vuln);
+  color: var(--orizzonte-severity-vuln);
   background-color: color-mix(
     in srgb,
-    var(--panorama-severity-vuln) 14%,
+    var(--orizzonte-severity-vuln) 14%,
     transparent
   );
 }
 
 .badge--deprecated {
-  color: var(--panorama-severity-deprecated);
+  color: var(--orizzonte-severity-deprecated);
   background-color: color-mix(
     in srgb,
-    var(--panorama-severity-deprecated) 12%,
+    var(--orizzonte-severity-deprecated) 12%,
     transparent
   );
 }
@@ -1701,26 +1701,26 @@ a:hover,
 }
 
 .badge--added {
-  color: var(--panorama-diff-added);
+  color: var(--orizzonte-diff-added);
   background-color: color-mix(
     in srgb,
-    var(--panorama-diff-added) 12%,
+    var(--orizzonte-diff-added) 12%,
     transparent
   );
 }
 
 .badge--changed {
-  color: var(--panorama-diff-changed);
+  color: var(--orizzonte-diff-changed);
   background-color: color-mix(
     in srgb,
-    var(--panorama-diff-changed) 12%,
+    var(--orizzonte-diff-changed) 12%,
     transparent
   );
 }
 
 /* Neutral: a dependency the other branch does not have is not a problem. */
 .badge--removed {
-  color: var(--panorama-diff-removed);
+  color: var(--orizzonte-diff-removed);
   background-color: transparent;
 }
 
@@ -1767,33 +1767,33 @@ a:hover,
 .version-latest--patch {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  padding: var(--panorama-space-0) var(--panorama-space-2);
-  border-radius: var(--panorama-radius);
+  padding: var(--orizzonte-space-0) var(--orizzonte-space-2);
+  border-radius: var(--orizzonte-radius);
 }
 
 .version-latest--major {
-  color: var(--panorama-severity-major);
+  color: var(--orizzonte-severity-major);
   background-color: color-mix(
     in srgb,
-    var(--panorama-severity-major) 14%,
+    var(--orizzonte-severity-major) 14%,
     transparent
   );
 }
 
 .version-latest--minor {
-  color: var(--panorama-severity-minor);
+  color: var(--orizzonte-severity-minor);
   background-color: color-mix(
     in srgb,
-    var(--panorama-severity-minor) 12%,
+    var(--orizzonte-severity-minor) 12%,
     transparent
   );
 }
 
 .version-latest--patch {
-  color: var(--panorama-severity-patch);
+  color: var(--orizzonte-severity-patch);
   background-color: color-mix(
     in srgb,
-    var(--panorama-severity-patch) 12%,
+    var(--orizzonte-severity-patch) 12%,
     transparent
   );
 }
@@ -1801,7 +1801,7 @@ a:hover,
 .version-latest--current {
   color: var(--vscode-foreground);
   font-variant-numeric: tabular-nums;
-  padding: var(--panorama-space-0) var(--panorama-space-2);
+  padding: var(--orizzonte-space-0) var(--orizzonte-space-2);
 }
 
 .package-name-highlight {
@@ -1817,14 +1817,14 @@ a:hover,
 
 .toolbar__menu {
   position: absolute;
-  top: calc(100% + var(--panorama-space-1));
+  top: calc(100% + var(--orizzonte-space-1));
   right: 0;
   z-index: 30;
   min-width: 14em;
   display: flex;
   flex-direction: column;
-  gap: var(--panorama-space-0);
-  padding: var(--panorama-space-1);
+  gap: var(--orizzonte-space-0);
+  padding: var(--orizzonte-space-1);
   background-color: var(
     --vscode-menu-background,
     var(--vscode-editorWidget-background)
@@ -1834,22 +1834,22 @@ a:hover,
       --vscode-menu-border,
       var(--vscode-widget-border, var(--vscode-panel-border))
     );
-  border-radius: var(--panorama-radius);
+  border-radius: var(--orizzonte-radius);
   box-shadow: 0 2px 8px var(--vscode-widget-shadow);
 }
 
 .toolbar__menu-item {
   display: flex;
   align-items: center;
-  gap: var(--panorama-space-3);
+  gap: var(--orizzonte-space-3);
   width: 100%;
   text-align: left;
   white-space: nowrap;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--panorama-radius);
+  border-radius: var(--orizzonte-radius);
   color: var(--vscode-menu-foreground, var(--vscode-foreground));
-  padding: var(--panorama-control-pad-y) var(--panorama-space-3);
+  padding: var(--orizzonte-control-pad-y) var(--orizzonte-space-3);
 }
 
 .toolbar__menu-item:hover:not(:disabled),

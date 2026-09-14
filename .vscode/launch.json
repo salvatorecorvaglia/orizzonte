@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run Panorama",
+      "name": "Run Orizzonte",
       "type": "extensionHost",
       "request": "launch",
       "args": [

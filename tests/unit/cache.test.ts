@@ -63,7 +63,7 @@ describe('TtlCache', () => {
 
   it('reads through to storage on a cold start', () => {
     const storage = new MapMemento();
-    storage.store.set('panorama.cache.k', {
+    storage.store.set('orizzonte.cache.k', {
       value: 'from disk',
       expiresAt: Date.now() + 10_000,
     });
@@ -82,8 +82,8 @@ describe('TtlCache', () => {
     // on storage means asking for the buffer to land first.
     await cache.flushNow();
 
-    expect(storage.store.has('panorama.cache.persisted')).toBe(true);
-    expect(storage.store.has('panorama.cache.ephemeral')).toBe(false);
+    expect(storage.store.has('orizzonte.cache.persisted')).toBe(true);
+    expect(storage.store.has('orizzonte.cache.ephemeral')).toBe(false);
     // Still readable in this session — it just does not survive a reload.
     expect(cache.get('ephemeral')).toBe(2);
   });
@@ -150,8 +150,8 @@ describe('TtlCache', () => {
       vi.advanceTimersByTime(30_000);
 
       expect(await cache.prune()).toBe(1);
-      expect(storage.store.has('panorama.cache.fresh')).toBe(true);
-      expect(storage.store.has('panorama.cache.stale')).toBe(false);
+      expect(storage.store.has('orizzonte.cache.fresh')).toBe(true);
+      expect(storage.store.has('orizzonte.cache.stale')).toBe(false);
     });
 
     it('leaves keys belonging to other extensions alone', async () => {
@@ -167,8 +167,8 @@ describe('TtlCache', () => {
 
     it('drops malformed entries, which are as useless as expired ones', async () => {
       const storage = new MapMemento();
-      storage.store.set('panorama.cache.broken', { value: 1 }); // no expiresAt
-      storage.store.set('panorama.cache.alsoBroken', null);
+      storage.store.set('orizzonte.cache.broken', { value: 1 }); // no expiresAt
+      storage.store.set('orizzonte.cache.alsoBroken', null);
 
       expect(await new TtlCache(storage).prune()).toBe(2);
       expect(storage.store.size).toBe(0);
@@ -192,15 +192,15 @@ describe('TtlCache', () => {
 
       const originalUpdate = storage.update.bind(storage);
       storage.update = (key: string, value: unknown) => {
-        if (key === 'panorama.cache.stale-a') {
+        if (key === 'orizzonte.cache.stale-a') {
           return Promise.reject(new Error('storage unavailable'));
         }
         return originalUpdate(key, value);
       };
 
       await expect(cache.prune()).resolves.toBe(1);
-      expect(storage.store.has('panorama.cache.stale-a')).toBe(true);
-      expect(storage.store.has('panorama.cache.stale-b')).toBe(false);
+      expect(storage.store.has('orizzonte.cache.stale-a')).toBe(true);
+      expect(storage.store.has('orizzonte.cache.stale-b')).toBe(false);
     });
   });
 });
@@ -255,7 +255,7 @@ describe('write batching', () => {
     ]);
     await cache.flushNow();
 
-    expect(writes).toEqual(['panorama.cache.pkg']);
+    expect(writes).toEqual(['orizzonte.cache.pkg']);
     // The last write wins, and the in-memory mirror agrees with storage.
     expect(cache.get('pkg')).toEqual({ v: 3 });
   });
@@ -279,8 +279,8 @@ describe('write batching', () => {
     await cache.set('pkg', 'value', 60_000);
     await cache.flushNow();
 
-    expect(writes).toContain('panorama.cache.pkg');
-    expect(memento.get('panorama.cache.pkg')).toBeDefined();
+    expect(writes).toContain('orizzonte.cache.pkg');
+    expect(memento.get('orizzonte.cache.pkg')).toBeDefined();
   });
 
   it('flushes on its own timer without anyone asking', async () => {
@@ -297,7 +297,7 @@ describe('write batching', () => {
       vi.useRealTimers();
     }
 
-    expect(writes).toContain('panorama.cache.pkg');
+    expect(writes).toContain('orizzonte.cache.pkg');
     void memento;
   });
 
@@ -305,14 +305,14 @@ describe('write batching', () => {
     // One failed removal must not abandon the rest of the sweep.
     const store = new Map<string, unknown>();
     const lapsed = { value: 'x', expiresAt: Date.now() - 1000 };
-    store.set('panorama.cache.a', lapsed);
-    store.set('panorama.cache.b', lapsed);
-    store.set('panorama.cache.c', lapsed);
+    store.set('orizzonte.cache.a', lapsed);
+    store.set('orizzonte.cache.b', lapsed);
+    store.set('orizzonte.cache.c', lapsed);
 
     const cache = new TtlCache({
       get: <T>(key: string) => store.get(key) as T | undefined,
       update: (key: string, value: unknown) => {
-        if (key === 'panorama.cache.b')
+        if (key === 'orizzonte.cache.b')
           return Promise.reject(new Error('nope'));
         store.delete(key);
         void value;
@@ -322,7 +322,7 @@ describe('write batching', () => {
     });
 
     expect(await cache.prune()).toBe(2);
-    expect(store.has('panorama.cache.a')).toBe(false);
-    expect(store.has('panorama.cache.c')).toBe(false);
+    expect(store.has('orizzonte.cache.a')).toBe(false);
+    expect(store.has('orizzonte.cache.c')).toBe(false);
   });
 });

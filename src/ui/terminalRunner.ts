@@ -1,7 +1,7 @@
 /**
  * Runs package-manager commands in a visible integrated terminal.
  *
- * Visible on purpose: you can watch what Panorama does, interrupt it, and
+ * Visible on purpose: you can watch what Orizzonte does, interrupt it, and
  * answer any prompt the tool raises (npm 2FA, private-registry auth, Poetry
  * keyring). None of that works with a hidden child process.
  *
@@ -15,7 +15,7 @@ import { SerialQueue } from '../core/serialQueue.js';
 import type { Command } from '../providers/provider.js';
 import { buildCommandLine, detectShell } from './quoting.js';
 
-const TERMINAL_NAME = 'Panorama';
+const TERMINAL_NAME = 'Orizzonte';
 
 export class TerminalRunner implements vscode.Disposable {
   private terminal: vscode.Terminal | undefined;

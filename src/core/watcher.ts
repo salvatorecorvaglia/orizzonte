@@ -2,7 +2,7 @@
  * Watches manifests and lockfiles, debounced.
  *
  * Lockfiles matter as much as manifests here: watching them is what makes the
- * panel refresh itself after an install finishes, whether Panorama started it
+ * panel refresh itself after an install finishes, whether Orizzonte started it
  * or the user typed the command themselves.
  */
 
@@ -34,7 +34,7 @@ export class ManifestWatcher implements vscode.Disposable {
    *
    * Paths the scan would ignore are dropped before the debounce rather than
    * after: `npm install` writes thousands of `package.json` files under
-   * `node_modules`, none of which change what Panorama displays.
+   * `node_modules`, none of which change what Orizzonte displays.
    */
   private schedule(uri: vscode.Uri): void {
     if (isExcluded(uri)) return;
@@ -59,7 +59,7 @@ export class ManifestWatcher implements vscode.Disposable {
 }
 
 /**
- * Whether a changed file sits somewhere `panorama.excludeGlobs` rules out.
+ * Whether a changed file sits somewhere `orizzonte.excludeGlobs` rules out.
  *
  * Matched with a plain segment test rather than a glob engine: the setting's
  * entries are directory patterns (`**​/node_modules/**`), and the only question
@@ -72,7 +72,7 @@ export function isExcluded(uri: vscode.Uri): boolean {
 }
 
 /**
- * The directory names `panorama.excludeGlobs` rules out, with the parse cached.
+ * The directory names `orizzonte.excludeGlobs` rules out, with the parse cached.
  *
  * This runs once per filesystem event, and `npm install` produces thousands of
  * them in a burst — re-running a regex over every configured glob each time is
@@ -91,7 +91,7 @@ let cachedExcludedDirectories = new Set<string>();
 
 function excludedDirectories(): Set<string> {
   const globs = vscode.workspace
-    .getConfiguration('panorama')
+    .getConfiguration('orizzonte')
     .get<string[]>('excludeGlobs', []);
 
   // `\0` cannot appear in a glob, so this cannot collide across different

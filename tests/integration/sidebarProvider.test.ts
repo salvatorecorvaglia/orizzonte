@@ -29,8 +29,8 @@ function resolveWithRealWebview(provider: SidebarViewProvider): {
   dispose: () => void;
 } {
   const panel = vscode.window.createWebviewPanel(
-    'panorama.sidebar.test',
-    'Panorama Sidebar Test',
+    'orizzonte.sidebar.test',
+    'Orizzonte Sidebar Test',
     vscode.ViewColumn.Active,
     {},
   );
@@ -117,14 +117,14 @@ function stubExecuteCommand() {
 }
 
 describe('SidebarViewProvider message handling', () => {
-  it('routes "openPanel" to the panorama.open command', () => {
+  it('routes "openPanel" to the orizzonte.open command', () => {
     const { handler, dispose } = resolveWithRealWebview(
       new SidebarViewProvider(vscode.Uri.file(__dirname)),
     );
     const stub = stubExecuteCommand();
     try {
       handler({ type: 'openPanel' });
-      assert.deepEqual(stub.calls, ['panorama.open']);
+      assert.deepEqual(stub.calls, ['orizzonte.open']);
     } finally {
       stub.restore();
       dispose();
@@ -139,12 +139,12 @@ describe('SidebarViewProvider message handling', () => {
     try {
       handler({
         type: 'openUrl',
-        url: 'https://github.com/salvatorecorvaglia/panorama',
+        url: 'https://github.com/salvatorecorvaglia/orizzonte',
       });
       assert.equal(stub.calls.length, 1);
       assert.equal(
         stub.calls[0].toString(),
-        'https://github.com/salvatorecorvaglia/panorama',
+        'https://github.com/salvatorecorvaglia/orizzonte',
       );
     } finally {
       stub.restore();

@@ -71,8 +71,8 @@ describe('HttpClient', () => {
       const agent = (calls[0].init.headers as Record<string, string>)[
         'User-Agent'
       ];
-      expect(agent).toContain('Panorama-VSCode/1.2.3');
-      expect(agent).toContain('github.com/salvatorecorvaglia/panorama');
+      expect(agent).toContain('Orizzonte-VSCode/1.2.3');
+      expect(agent).toContain('github.com/salvatorecorvaglia/orizzonte');
     });
 
     it('carries a contact address when one is configured, as Packagist asks', async () => {

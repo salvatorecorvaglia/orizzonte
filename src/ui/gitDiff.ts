@@ -65,7 +65,7 @@ export type RepositoryLookup =
 
 /**
  * The workspace's one Git repository, or an explanatory message when there
- * is not exactly one. Panorama compares within a single repository rather
+ * is not exactly one. Orizzonte compares within a single repository rather
  * than building a repository picker for the far less common multi-repo case.
  */
 export async function findSingleRepository(): Promise<RepositoryLookup> {
@@ -83,7 +83,7 @@ export async function findSingleRepository(): Promise<RepositoryLookup> {
     return {
       ok: false,
       message:
-        'This workspace has more than one Git repository; Panorama compares dependencies within a single repository.',
+        'This workspace has more than one Git repository; Orizzonte compares dependencies within a single repository.',
     };
   }
   return { ok: true, repository: api.repositories[0] };

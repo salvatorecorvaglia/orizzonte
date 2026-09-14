@@ -124,7 +124,7 @@ export function SearchInstall({
   return (
     <section
       className="search-panel"
-      id="panorama-search-panel"
+      id="orizzonte-search-panel"
       aria-label="Package search"
       onKeyDown={handlePanelKeyDown}
     >

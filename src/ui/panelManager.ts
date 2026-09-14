@@ -119,8 +119,8 @@ export class PanelManager implements vscode.Disposable {
     }
 
     this.panel = vscode.window.createWebviewPanel(
-      'panorama.dependencies',
-      'Panorama: Dependencies',
+      'orizzonte.dependencies',
+      'Orizzonte: Dependencies',
       vscode.ViewColumn.Active,
       {
         enableScripts: true,
@@ -136,7 +136,7 @@ export class PanelManager implements vscode.Disposable {
     this.panel.iconPath = vscode.Uri.joinPath(
       this.extensionUri,
       'resources',
-      'panorama.svg',
+      'orizzonte.svg',
     );
     this.panel.webview.html = this.buildHtml(this.panel.webview);
 
@@ -237,15 +237,15 @@ export class PanelManager implements vscode.Disposable {
       }
 
       case 'refresh':
-        await vscode.commands.executeCommand('panorama.refresh');
+        await vscode.commands.executeCommand('orizzonte.refresh');
         return;
 
       case 'checkUpdates':
-        await vscode.commands.executeCommand('panorama.checkUpdates');
+        await vscode.commands.executeCommand('orizzonte.checkUpdates');
         return;
 
       case 'exportReport':
-        await vscode.commands.executeCommand('panorama.exportReport');
+        await vscode.commands.executeCommand('orizzonte.exportReport');
         return;
 
       case 'search':
@@ -283,7 +283,7 @@ export class PanelManager implements vscode.Disposable {
         // Without a manifest the command owns the choice, because it owns the
         // quick-pick that makes it.
         if (message.manifestPath === undefined) {
-          await vscode.commands.executeCommand('panorama.updateAll');
+          await vscode.commands.executeCommand('orizzonte.updateAll');
         } else {
           await this.updateAll(message.manifestPath);
         }
@@ -452,7 +452,7 @@ export class PanelManager implements vscode.Disposable {
       this.post({
         type: 'error',
         message:
-          `Panorama cannot add ${name} to ${path.basename(manifestPath)} automatically. ` +
+          `Orizzonte cannot add ${name} to ${path.basename(manifestPath)} automatically. ` +
           `Opening the file so you can add it by hand.`,
       });
       await this.openManifest(manifestPath);
@@ -497,7 +497,7 @@ export class PanelManager implements vscode.Disposable {
       this.post({
         type: 'error',
         message:
-          `${dep.name} is declared in a form Panorama cannot rewrite safely ` +
+          `${dep.name} is declared in a form Orizzonte cannot rewrite safely ` +
           `(a computed or inherited version). Opening the file instead.`,
       });
       await this.openManifest(dep.manifestPath, dep.name);
@@ -535,7 +535,7 @@ export class PanelManager implements vscode.Disposable {
     );
     if (choice !== 'Update') return;
 
-    // Named rather than counted: a package Panorama cannot rewrite is the one
+    // Named rather than counted: a package Orizzonte cannot rewrite is the one
     // the user has to go and edit by hand, so it has to be identifiable.
     const skipped: string[] = [];
     for (const entry of resolved) {
@@ -562,7 +562,7 @@ export class PanelManager implements vscode.Disposable {
         type: 'error',
         message:
           `Could not update ${skipped.join(', ')} automatically — ` +
-          `declared in a form Panorama cannot rewrite safely.`,
+          `declared in a form Orizzonte cannot rewrite safely.`,
       });
     }
     await this.refresh();
@@ -603,7 +603,7 @@ export class PanelManager implements vscode.Disposable {
     await this.refresh();
   }
 
-  /** Also invoked from the `panorama.updateAll` command, not just the webview. */
+  /** Also invoked from the `orizzonte.updateAll` command, not just the webview. */
   async updateAll(manifestPath: string): Promise<void> {
     const group = this.latest.groups.find(
       (candidate) => candidate.manifestPath === manifestPath,
@@ -663,7 +663,7 @@ export class PanelManager implements vscode.Disposable {
     if (!applied) {
       this.post({
         type: 'error',
-        message: `Panorama could not remove ${dep.name} automatically. Opening the manifest.`,
+        message: `Orizzonte could not remove ${dep.name} automatically. Opening the manifest.`,
       });
       await this.openManifest(dep.manifestPath, dep.name);
     }
@@ -801,7 +801,7 @@ export class PanelManager implements vscode.Disposable {
 
       if (controller.signal.aborted) return;
 
-      const config = vscode.workspace.getConfiguration('panorama');
+      const config = vscode.workspace.getConfiguration('orizzonte');
       const summary = buildLicenseSummary(packages, {
         allow: config.get<string[]>('licenseAllowList', []),
         deny: config.get<string[]>('licenseDenyList', []),
@@ -848,7 +848,7 @@ export class PanelManager implements vscode.Disposable {
    * Compares every project's lockfile against a Git ref the user picks.
    *
    * The ref picker is a native quick-pick, not webview UI — the same reason
-   * `panorama.updateAll`'s project picker is native — so this needs no
+   * `orizzonte.updateAll`'s project picker is native — so this needs no
    * request/response round trip just to ask which ref, only to report back
    * once one is chosen (or nothing at all, if the picker was dismissed).
    */
@@ -895,7 +895,7 @@ export class PanelManager implements vscode.Disposable {
    * unreliable.
    */
   private async refresh(): Promise<void> {
-    await vscode.commands.executeCommand('panorama.refresh');
+    await vscode.commands.executeCommand('orizzonte.refresh');
   }
 
   private findDependency(
@@ -962,7 +962,7 @@ export class PanelManager implements vscode.Disposable {
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="${styleUri}" />
-    <title>Panorama</title>
+    <title>Orizzonte</title>
   </head>
   <body>
     <div id="root"></div>

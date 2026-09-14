@@ -1,6 +1,6 @@
 /**
  * `resolveRegistryOverride`: alias resolution, trimming, and the http(s)-only
- * scheme check that keeps `panorama.registryOverrides` from sending a
+ * scheme check that keeps `orizzonte.registryOverrides` from sending a
  * malformed or exotic URL straight to `fetch()`.
  */
 

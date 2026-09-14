@@ -1,5 +1,5 @@
 /**
- * Version comparison is the highest-risk correctness surface in Panorama: get
+ * Version comparison is the highest-risk correctness surface in Orizzonte: get
  * an ordering wrong and the UI confidently shows the wrong "latest". These
  * tests pin the rules that differ between ecosystems.
  */

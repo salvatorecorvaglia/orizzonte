@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Renamed Panorama to Orizzonte**: The extension, its repository and every identifier it contributes now carry the new name. This is a breaking change for existing installs: the extension ID is now `orizzonte.orizzonte-vscode`, every command moved from `panorama.*` to `orizzonte.*`, and every setting moved from `panorama.*` to `orizzonte.*` (e.g. `panorama.registryOverrides` → `orizzonte.registryOverrides`), so values saved under the old keys must be copied across by hand. The Activity Bar view, webview CSS tokens (`--orizzonte-*`), branding assets (`orizzonte.svg`, `orizzonte.png`) and the registry User-Agent (`Orizzonte-VSCode/<version>`) follow suit. Earlier entries below use the new names for consistency.
+
 ## [2.10.0] - 2026-09-05
 
 ### Fixed
@@ -17,12 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Diff Badges Off the Severity Ramp**: The dependency-diff panel painted `added` in patch blue, `changed` in minor yellow and `removed` in the red `theme.css` reserves for "vulnerable" — so a package merely absent from the compared branch wore the one colour that is meant to say an advisory exists against it. Added/removed/changed describe a direction rather than a magnitude or a health problem, so they now read from their own tokens (`--panorama-diff-added`, `--panorama-diff-changed`, `--panorama-diff-removed`: green, blue and a neutral) and are registered in the `forced-colors` block alongside the badges they sit beside. Nothing feeding the Status badge or the Latest column changed.
+- **Diff Badges Off the Severity Ramp**: The dependency-diff panel painted `added` in patch blue, `changed` in minor yellow and `removed` in the red `theme.css` reserves for "vulnerable" — so a package merely absent from the compared branch wore the one colour that is meant to say an advisory exists against it. Added/removed/changed describe a direction rather than a magnitude or a health problem, so they now read from their own tokens (`--orizzonte-diff-added`, `--orizzonte-diff-changed`, `--orizzonte-diff-removed`: green, blue and a neutral) and are registered in the `forced-colors` block alongside the badges they sit beside. Nothing feeding the Status badge or the Latest column changed.
 - **Flagged Licenses No Longer Wear the Vulnerability Red**: The license summary marked a policy-flagged license with `severity--vuln` while the banner directly above it used `callout--warn`, so one panel stated one state in two colours. The inline marker now uses the colour its own banner already does.
 
 ### Removed
 
-- **Dead Webview CSS**: `.cell--checkbox` and the `--panorama-checkbox-column` token it alone consumed (the row checkbox lives inside the name cell, not a cell of its own), `.highlight-outdated` (never applied), and the `.kpi-dot--outdated` / `--vuln` / `--deprecated` modifiers left behind in 2.7.0 when those counts moved onto the filter chips. `.kpi-dot--total`, which the workspace total still renders, stays.
+- **Dead Webview CSS**: `.cell--checkbox` and the `--orizzonte-checkbox-column` token it alone consumed (the row checkbox lives inside the name cell, not a cell of its own), `.highlight-outdated` (never applied), and the `.kpi-dot--outdated` / `--vuln` / `--deprecated` modifiers left behind in 2.7.0 when those counts moved onto the filter chips. `.kpi-dot--total`, which the workspace total still renders, stays.
 
 ## [2.9.0] - 2026-09-02
 
@@ -87,12 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Inline Update & Vulnerability CodeLenses**: Manifest files (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `composer.json`, `pom.xml`, `build.gradle(.kts)`) now show a CodeLens above each dependency with an available update and/or known vulnerabilities, so that status is visible without opening the Panorama panel. Clicking a lens opens the panel on that dependency's details.
+- **Inline Update & Vulnerability CodeLenses**: Manifest files (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `composer.json`, `pom.xml`, `build.gradle(.kts)`) now show a CodeLens above each dependency with an available update and/or known vulnerabilities, so that status is visible without opening the Orizzonte panel. Clicking a lens opens the panel on that dependency's details.
 - **Vulnerability Diagnostics**: Dependencies with known vulnerabilities are now also reported as Problems-panel diagnostics on their declaration line, for open manifest files.
-- **Duplicate Version Detection**: A new "Duplicate versions" panel checks each project's lockfile (npm, pnpm, yarn, Cargo, Composer, poetry/uv) for packages resolved at more than one version at once, listing every project and version group found. Go, Maven and Gradle are reported as unchecked rather than clean, since none has a lockfile Panorama can trust for this.
-- **Export Dependency Report**: A new "Export report" action (toolbar button and `panorama.exportReport` command) writes the current scan — outdated packages, known vulnerabilities and duplicate versions, per project — to a Markdown or JSON file the user chooses, for sharing outside the editor or attaching to a PR.
-- **License Metadata & Policy**: Package metadata now includes the registry-reported license (npm, PyPI, Crates.io, Packagist), shown in the dependency detail drawer. A new "License summary" panel checks every unique package in the workspace and groups them by license, flagging any that violate the new `panorama.licenseAllowList`/`licenseDenyList` settings. Go, Maven and Gradle packages are grouped as unknown rather than guessed, since none of their registries expose a license Panorama can attribute with confidence.
-- **Authenticated Registry Overrides**: `panorama.registryOverrides` entries can now be an object naming an environment variable that holds a bearer token for that registry (e.g. `{ "npm": { "url": "https://registry.mycompany.com", "tokenEnvVar": "COMPANY_NPM_TOKEN" } }`), for private registries (Artifactory, Nexus, GitHub Packages, private PyPI/Packagist mirrors, ...) that require authentication. The token is read from the named environment variable at request time and is never written to settings or any other Panorama-managed storage; it is also never sent unless the configured URL passes the same scheme validation the existing unauthenticated override already requires, so a malformed override can never leak a token to the public registry. Supported by all seven providers.
+- **Duplicate Version Detection**: A new "Duplicate versions" panel checks each project's lockfile (npm, pnpm, yarn, Cargo, Composer, poetry/uv) for packages resolved at more than one version at once, listing every project and version group found. Go, Maven and Gradle are reported as unchecked rather than clean, since none has a lockfile Orizzonte can trust for this.
+- **Export Dependency Report**: A new "Export report" action (toolbar button and `orizzonte.exportReport` command) writes the current scan — outdated packages, known vulnerabilities and duplicate versions, per project — to a Markdown or JSON file the user chooses, for sharing outside the editor or attaching to a PR.
+- **License Metadata & Policy**: Package metadata now includes the registry-reported license (npm, PyPI, Crates.io, Packagist), shown in the dependency detail drawer. A new "License summary" panel checks every unique package in the workspace and groups them by license, flagging any that violate the new `orizzonte.licenseAllowList`/`licenseDenyList` settings. Go, Maven and Gradle packages are grouped as unknown rather than guessed, since none of their registries expose a license Orizzonte can attribute with confidence.
+- **Authenticated Registry Overrides**: `orizzonte.registryOverrides` entries can now be an object naming an environment variable that holds a bearer token for that registry (e.g. `{ "npm": { "url": "https://registry.mycompany.com", "tokenEnvVar": "COMPANY_NPM_TOKEN" } }`), for private registries (Artifactory, Nexus, GitHub Packages, private PyPI/Packagist mirrors, ...) that require authentication. The token is read from the named environment variable at request time and is never written to settings or any other Orizzonte-managed storage; it is also never sent unless the configured URL passes the same scheme validation the existing unauthenticated override already requires, so a malformed override can never leak a token to the public registry. Supported by all seven providers.
 - **"What's Changed" Before Updating**: The detail drawer now shows GitHub release notes between a dependency's installed and target version, for packages hosted on GitHub with an available update. Matched by comparing release tag text rather than parsing semver, so it degrades to "most recent releases" instead of guessing when a tag can't be matched.
 - **Compare Dependencies With a Branch**: A new "Compare with…" toolbar action lets you pick a Git ref (from a native quick-pick) and shows what every project's lockfile would add, remove, or change versions on relative to the working tree — useful for seeing a PR's or branch's actual dependency impact without leaving the editor. Limited to workspaces with exactly one Git repository.
 
@@ -100,8 +104,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Custom Registry Overrides for All Providers**: Extended `panorama.registryOverrides` support to Cargo, Composer, Go, and Maven/Gradle (previously limited to npm and PyPI), so a private registry or mirror can be configured for every ecosystem.
-- **Workspace Trust Support**: Declared the `untrustedWorkspaces` capability in `package.json`, restricting `panorama.registryOverrides` so it is not read from an untrusted workspace's settings.
+- **Custom Registry Overrides for All Providers**: Extended `orizzonte.registryOverrides` support to Cargo, Composer, Go, and Maven/Gradle (previously limited to npm and PyPI), so a private registry or mirror can be configured for every ecosystem.
+- **Workspace Trust Support**: Declared the `untrustedWorkspaces` capability in `package.json`, restricting `orizzonte.registryOverrides` so it is not read from an untrusted workspace's settings.
 - **Update Preserves the Declared Version Range Operator**: Updating a Node dependency now carries the manifest's existing `^`/`~` prefix onto the new version (`applyDeclaredPrefix`) instead of silently pinning an exact version.
 - **CI Verify Gate on Release**: `release.yml` now runs lint, typecheck, and unit tests in a dedicated `Verify` job that `Release` depends on.
 - **Registry Rate Limits for PyPI & the Go Proxy**: Added self-imposed per-host rate limits for `pypi.org` and `proxy.golang.org`, matching the existing limits for Maven Central, Packagist, and OSV.dev.
@@ -218,7 +222,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP retries now share one deadline across the whole chain rather than each attempt getting a fresh timeout.
 - **Every colour in the webview is a theme token again.** A block of hardcoded hex values had accumulated at the end of `theme.css` (and in the sidebar's inline styles), which broke contrast in light themes and ignored high-contrast ones. Added a `forced-colors` block.
 - Go's `// indirect` requirements are labelled "indirect" rather than "optional", and Cargo's `workspace = true` reads as "inherited from workspace". Both corrections live in `core/vocabulary.ts`.
-- The Activity Bar view is named "Panorama" and documented as what it is — a launcher for the panel, not a second place to inspect dependencies.
+- The Activity Bar view is named "Orizzonte" and documented as what it is — a launcher for the panel, not a second place to inspect dependencies.
 - **CI/CD & Release Workflow**:
   - Updated GitHub Actions workflows (`ci.yml` and `release.yml`) for improved build reliability and release automation.
   - Upgraded Biome linter schema configuration and cleaned up whitespace across test suites.
@@ -231,9 +235,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **Dead tree-view surface**: `ui/treeProvider.ts` and the `panorama.revealDependency` command were left unreferenced by the sidebar migration and have been deleted, along with ~100 lines of sidebar CSS for markup that does not exist and a duplicated PEP 503 name normaliser.
+- **Dead tree-view surface**: `ui/treeProvider.ts` and the `orizzonte.revealDependency` command were left unreferenced by the sidebar migration and have been deleted, along with ~100 lines of sidebar CSS for markup that does not exist and a duplicated PEP 503 name normaliser.
 - **Mute List Functionality**:
-  - Removed package muting capability across extension host, workspace state, webview toolbar, detail drawer, and commands (`panorama.toggleMute` and `panorama.clearMuted`).
+  - Removed package muting capability across extension host, workspace state, webview toolbar, detail drawer, and commands (`orizzonte.toggleMute` and `orizzonte.clearMuted`).
 
 ## [1.2.0] - 2026-08-12
 
@@ -250,7 +254,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Unified test directory layout by consolidating `test/` into `tests/`.
   - Updated build configurations (`tsconfig.json`, `tsconfig.integration.json`, `vitest.config.ts`, `biome.json`, and `package.json`) to reflect unified test structure.
 - **Branding & Vector Assets**:
-  - High-resolution SVG and PNG branding asset updates (`panorama.svg` and `panorama.png`).
+  - High-resolution SVG and PNG branding asset updates (`orizzonte.svg` and `orizzonte.png`).
 
 ## [1.1.0] - 2026-08-12
 
@@ -264,7 +268,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Error Notification Queuing**:
   - Error queuing toast alert system to manage and present multiple concurrent host/registry errors without silent dropping.
 - **Branding & Visuals**:
-  - Vector branding assets (`panorama.svg` and `panorama.png`) for extension sidebar icon and webview headers.
+  - Vector branding assets (`orizzonte.svg` and `orizzonte.png`) for extension sidebar icon and webview headers.
 
 ### Changed
 
@@ -275,20 +279,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- First implementation of Panorama.
+- First implementation of Orizzonte.
 
-[Unreleased]: https://github.com/salvatorecorvaglia/panorama/compare/v2.10.0...HEAD
-[2.10.0]: https://github.com/salvatorecorvaglia/panorama/compare/v2.9.0...v2.10.0
-[2.9.0]: https://github.com/salvatorecorvaglia/panorama/compare/v2.8.0...v2.9.0
-[2.8.0]: https://github.com/salvatorecorvaglia/panorama/compare/v2.7.0...v2.8.0
-[2.7.0]: https://github.com/salvatorecorvaglia/panorama/compare/v2.6.0...v2.7.0
-[2.6.0]: https://github.com/salvatorecorvaglia/panorama/compare/v2.5.0...v2.6.0
-[2.5.0]: https://github.com/salvatorecorvaglia/panorama/compare/v2.4.0...v2.5.0
-[2.4.0]: https://github.com/salvatorecorvaglia/panorama/compare/v2.3.0...v2.4.0
-[2.3.0]: https://github.com/salvatorecorvaglia/panorama/compare/v2.2.0...v2.3.0
-[2.2.0]: https://github.com/salvatorecorvaglia/panorama/compare/v2.1.0...v2.2.0
-[2.1.0]: https://github.com/salvatorecorvaglia/panorama/compare/v2.0.0...v2.1.0
-[2.0.0]: https://github.com/salvatorecorvaglia/panorama/compare/v1.2.0...v2.0.0
-[1.2.0]: https://github.com/salvatorecorvaglia/panorama/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/salvatorecorvaglia/panorama/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/salvatorecorvaglia/panorama/releases/tag/v1.0.0
+[Unreleased]: https://github.com/salvatorecorvaglia/orizzonte/compare/v2.10.0...HEAD
+[2.10.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v2.9.0...v2.10.0
+[2.9.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v2.8.0...v2.9.0
+[2.8.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v2.7.0...v2.8.0
+[2.7.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v2.6.0...v2.7.0
+[2.6.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v2.4.0...v2.5.0
+[2.4.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v2.3.0...v2.4.0
+[2.3.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v1.2.0...v2.0.0
+[1.2.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/salvatorecorvaglia/orizzonte/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/salvatorecorvaglia/orizzonte/releases/tag/v1.0.0

@@ -13,7 +13,7 @@ import * as vscode from 'vscode';
 import { isExcluded } from '../../src/core/watcher.js';
 
 describe('isExcluded', () => {
-  const config = vscode.workspace.getConfiguration('panorama');
+  const config = vscode.workspace.getConfiguration('orizzonte');
 
   afterEach(async () => {
     await config.update(

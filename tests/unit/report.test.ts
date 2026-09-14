@@ -69,7 +69,7 @@ describe('buildReport (markdown)', () => {
       OPTIONS,
       'markdown',
     );
-    expect(output).toContain('# Panorama Dependency Report');
+    expect(output).toContain('# Orizzonte Dependency Report');
     expect(output).toContain('**Generated:** 2026-08-26T00:00:00.000Z');
     expect(output).toContain('5 package(s) across 0 project(s)');
     expect(output).toContain('- 2 outdated');

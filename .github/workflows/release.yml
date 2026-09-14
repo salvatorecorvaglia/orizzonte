@@ -120,7 +120,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          name: Panorama ${{ github.ref_name }}
+          name: Orizzonte ${{ github.ref_name }}
           files: '*.vsix'
           body_path: ${{ hashFiles('RELEASE_NOTES.md') != '' && 'RELEASE_NOTES.md' || '' }}
           generate_release_notes: false

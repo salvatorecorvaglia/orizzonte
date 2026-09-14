@@ -1,7 +1,7 @@
 /**
- * The security primitives every Panorama webview shares.
+ * The security primitives every Orizzonte webview shares.
  *
- * Panorama has two webview surfaces — the dependency panel and the Activity Bar
+ * Orizzonte has two webview surfaces — the dependency panel and the Activity Bar
  * view — and they had drifted apart on exactly the details that matter: one
  * generated its CSP nonce from `Math.random`, and one opened whatever URL it was
  * handed without looking at the scheme. Neither difference was deliberate; they
@@ -27,7 +27,7 @@ export function createNonce(): string {
 }
 
 /**
- * The Content-Security-Policy every Panorama webview shares.
+ * The Content-Security-Policy every Orizzonte webview shares.
  *
  * `connect-src 'none'` is deliberate: no webview talks to the network
  * directly — every registry call happens in the extension host. Scripts load

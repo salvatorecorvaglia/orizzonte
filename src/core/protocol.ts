@@ -46,7 +46,7 @@ export type WebviewMessage =
    * The toolbar's global button counts outdated packages across the whole
    * workspace, so it cannot name a single manifest without picking one
    * arbitrarily. Omitting the path routes through the same quick-pick the
-   * `panorama.updateAll` command uses.
+   * `orizzonte.updateAll` command uses.
    */
   | { type: 'updateAll'; manifestPath?: string }
   | { type: 'uninstall'; depKey: string }
@@ -76,7 +76,7 @@ export type WebviewMessage =
   | { type: 'requestDuplicates' }
   /**
    * Fetches license metadata for every unique package across the workspace
-   * and groups them against `panorama.licenseAllowList`/`licenseDenyList`.
+   * and groups them against `orizzonte.licenseAllowList`/`licenseDenyList`.
    *
    * Unlike `requestDuplicates` this does reach the network — once per unique
    * package, cached the same as any other metadata fetch — so unlike the
@@ -89,7 +89,7 @@ export type WebviewMessage =
   /**
    * Compares every project's lockfile against a Git ref the user picks from
    * a native quick-pick — there is no webview form for ref selection, the
-   * same reasoning `panorama.updateAll`'s project quick-pick already follows.
+   * same reasoning `orizzonte.updateAll`'s project quick-pick already follows.
    */
   | { type: 'requestDependencyDiff' }
   | { type: 'exportReport' }
@@ -146,11 +146,11 @@ export type HostMessage =
     }
   | { type: 'error'; message: string }
   | { type: 'notice'; message: string }
-  /** Opens the registry search UI — fired by the `panorama.searchInstall` command. */
+  /** Opens the registry search UI — fired by the `orizzonte.searchInstall` command. */
   | { type: 'focusSearch' }
   /**
    * Selects a package and opens its detail drawer on the "why" section — fired
-   * by `panorama.showWhy`, including from the tree view's context menu.
+   * by `orizzonte.showWhy`, including from the tree view's context menu.
    */
   | { type: 'focusDependency'; depKey: string; reveal: 'details' | 'why' };
 

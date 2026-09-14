@@ -1,5 +1,5 @@
 /**
- * The one place Panorama talks to the network.
+ * The one place Orizzonte talks to the network.
  *
  * Every registry has its own etiquette and we honour all of it here rather than
  * scattering headers and sleeps across seven providers:
@@ -124,7 +124,7 @@ export class HttpClient {
     this.userAgent = buildUserAgent(extensionVersion, contactEmail);
   }
 
-  /** Rebuilds the User-Agent after the user edits `panorama.contactEmail`. */
+  /** Rebuilds the User-Agent after the user edits `orizzonte.contactEmail`. */
   setContactEmail(extensionVersion: string, contactEmail?: string): void {
     this.userAgent = buildUserAgent(extensionVersion, contactEmail);
   }
@@ -325,7 +325,7 @@ export class HttpError extends Error {
 
 function buildUserAgent(version: string, contactEmail?: string): string {
   const contact = contactEmail?.trim() ? `; mailto=${contactEmail.trim()}` : '';
-  return `Panorama-VSCode/${version} (+https://github.com/salvatorecorvaglia/panorama${contact})`;
+  return `Orizzonte-VSCode/${version} (+https://github.com/salvatorecorvaglia/orizzonte${contact})`;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

@@ -45,7 +45,7 @@ function buildMarkdownReport(
     duplicates.map((entry) => [entry.manifestPath, entry]),
   );
 
-  const lines: string[] = ['# Panorama Dependency Report', ''];
+  const lines: string[] = ['# Orizzonte Dependency Report', ''];
   if (options.workspaceName) {
     lines.push(`**Workspace:** ${options.workspaceName}  `);
   }
@@ -120,7 +120,7 @@ function buildMarkdownReport(
       lines.push('');
     } else if (duplicate && !duplicate.checked) {
       lines.push(
-        '_Duplicate versions were not checked for this project — no lockfile Panorama can verify._',
+        '_Duplicate versions were not checked for this project — no lockfile Orizzonte can verify._',
         '',
       );
     }

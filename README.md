@@ -1,8 +1,8 @@
-# Panorama 🔭
+# Orizzonte 🔭
 
 **Universal Visual Package Manager for Visual Studio Code**
 
-**Panorama** provides a unified, visual, multi-ecosystem package management experience directly inside VS Code.
+**Orizzonte** provides a unified, visual, multi-ecosystem package management experience directly inside VS Code.
 
 ---
 
@@ -10,8 +10,8 @@
 
 - 🌐 **Universal Multi-Ecosystem Support**: Native parsing for `package.json`, `pyproject.toml`, `requirements.txt`, `Cargo.toml`, `go.mod`, `composer.json`, `pom.xml`, `build.gradle`, and `build.gradle.kts`.
 - ⚡ **Panel-First Interface**:
-  - **React Webview Panel** (`panorama.open`): Interactive, virtualized UI built with React, Vite, and TanStack Virtual for deep dependency analysis, search, sorting, and filtering. This is where dependencies are read and acted on.
-  - **Activity Bar View** (`panorama.sidebar`): A compact launcher for the panel. Its title bar carries the toolbar actions — open, search, check updates, refresh and update all — so they are one click away without the panel being open.
+  - **React Webview Panel** (`orizzonte.open`): Interactive, virtualized UI built with React, Vite, and TanStack Virtual for deep dependency analysis, search, sorting, and filtering. This is where dependencies are read and acted on.
+  - **Activity Bar View** (`orizzonte.sidebar`): A compact launcher for the panel. Its title bar carries the toolbar actions — open, search, check updates, refresh and update all — so they are one click away without the panel being open.
   - **Inline CodeLenses**: Manifest files show a CodeLens above each dependency with an available update and/or known vulnerabilities, so status is visible without opening the panel — clicking one jumps straight to that dependency's details.
 - 🎛️ **Focused Toolbar**: The actions used every session — search, check updates, refresh — stay inline; duplicate versions, licenses, branch comparison and report export sit behind a **More** menu with full keyboard support. Filter chips carry their own counts, so a number and the control that acts on it are the same thing, and one overlay panel is open at a time rather than four stacking over the table. The panel opens with the `outdated` chip already pressed — what needs updating rather than the whole inventory — with "Clear filters" one click from the full list.
 - 📐 **Density-Aware Layout**: The table adapts as the panel narrows — dropping the Size and Scope columns, then reducing the row actions to icons — so it stays usable dragged into the secondary sidebar instead of scrolling sideways.
@@ -48,14 +48,14 @@
 ## 🚀 Installation & Getting Started
 
 ### Installation
-- **Open VSX**: Install from the [Open VSX Registry](https://open-vsx.org/extension/panorama/panorama-vscode) or search `Panorama` in VS Code / VSCodium / Gitpod.
-- **GitHub Release**: Download the compiled `.vsix` from [GitHub Releases](https://github.com/salvatorecorvaglia/panorama/releases) and run **`Extensions: Install from VSIX...`**.
+- **Open VSX**: Install from the [Open VSX Registry](https://open-vsx.org/extension/orizzonte/orizzonte-vscode) or search `Orizzonte` in VS Code / VSCodium / Gitpod.
+- **GitHub Release**: Download the compiled `.vsix` from [GitHub Releases](https://github.com/salvatorecorvaglia/orizzonte/releases) and run **`Extensions: Install from VSIX...`**.
 
 ### Getting Started
 1. Open any project or workspace containing supported manifest files in VS Code.
-2. Open Panorama:
-   - Click on the **Panorama** icon in the Activity Bar.
-   - Or open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`) and run **`Panorama: Open Dependency Panel`**.
+2. Open Orizzonte:
+   - Click on the **Orizzonte** icon in the Activity Bar.
+   - Or open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`) and run **`Orizzonte: Open Dependency Panel`**.
 3. Use the toolbar actions to check for updates, scan security vulnerabilities, or search and install new dependencies.
 4. The **More** menu holds the occasional actions: duplicate-version detection, the license summary, comparing against a branch, and exporting a report.
 

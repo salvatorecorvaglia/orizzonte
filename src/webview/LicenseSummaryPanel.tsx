@@ -1,6 +1,6 @@
 /**
  * Workspace-wide license summary: every unique package grouped by license,
- * checked against `panorama.licenseAllowList`/`licenseDenyList`.
+ * checked against `orizzonte.licenseAllowList`/`licenseDenyList`.
  *
  * Unlike the duplicate-versions panel this reaches the network — once per
  * unique package — so it does not refetch itself on every scan; only the
@@ -39,7 +39,7 @@ export function LicenseSummaryPanel({
   return (
     <section
       className="search-panel"
-      id="panorama-licenses-panel"
+      id="orizzonte-licenses-panel"
       aria-label="License summary"
       onKeyDown={handlePanelKeyDown}
     >

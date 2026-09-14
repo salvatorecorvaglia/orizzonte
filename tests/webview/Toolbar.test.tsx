@@ -155,7 +155,7 @@ describe('actions', () => {
     const { rerender, props } = renderToolbar();
     const toggle = screen.getByRole('button', { name: /Add package/i });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(toggle).toHaveAttribute('aria-controls', 'panorama-search-panel');
+    expect(toggle).toHaveAttribute('aria-controls', 'orizzonte-search-panel');
 
     rerender(<Toolbar {...props} activePanel="search" />);
     expect(
