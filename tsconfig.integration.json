@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The VS Code test host loads these through Mocha's CommonJS require, so
+    // this build cannot use the bundler-oriented settings the host bundle uses.
+    "module": "CommonJS",
+    "outDir": "out",
+    "rootDir": ".",
+    "noEmit": false,
+    "types": ["node", "mocha", "vscode"]
+  },
+  "include": ["tests/integration/**/*.ts", "src/**/*.ts"],
+  "exclude": ["src/webview/**", "tests/unit/**", "tests/fixtures/**"]
+}

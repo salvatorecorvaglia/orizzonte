@@ -1,0 +1,81 @@
+# Dependencies & Package Managers
+node_modules/
+.pnpm-store/
+
+# Build and Output directories
+dist/
+out/
+build/
+*.vsix
+
+# VS Code test & temporary files
+.vscode-test/
+
+# Testing & Coverage & Caches
+coverage/
+.vitest/
+.biome_cache/
+.vite/
+.eslintcache
+.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Environment & local config
+.env
+.env.*
+.env.local
+.env.*.local
+!.env.example
+
+# IDEs & Editors
+# .vscode/ is deliberately tracked: launch.json is how a contributor runs the
+# extension host, so it belongs in the repo rather than in each clone.
+# The fixtures workspace is the exception: it's the `workspaceFolder` the
+# integration suite runs against, and any test that updates configuration at
+# ConfigurationTarget.Workspace (see tests/integration/watcher.test.ts)
+# leaves VS Code's own settings.json behind there — a test artifact, not
+# something to commit.
+tests/fixtures/.vscode/
+.idea/
+.zed/
+*.swp
+*.swo
+*~
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+.Spotlight-V100
+.Trashes
+
+# AI Tools & Agents
+.openai/
+.chatgpt/
+gpt-config.json
+openai.config.json
+.anthropic/
+.claude/
+claude.config.json
+claude-settings.json
+.prompts/
+.prompt-cache/
+.ai/
+.gemini/
+.antigravity/
+.antigravitycli/
+.copilot/
+.codex/
+.cagent/
+.cursor/
+.windsurf/
+.cline/
+CLAUDE.md

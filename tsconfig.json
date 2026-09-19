@@ -1,0 +1,42 @@
+{
+  "compilerOptions": {
+    // esbuild bundles the host into a single CommonJS file, so we typecheck
+    // with bundler resolution — that lets us consume ESM-only dependencies
+    // (smol-toml) that Node16 resolution would reject.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "outDir": "out",
+    "rootDir": ".",
+    "sourceMap": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    // Off, not just unset: turning this on surfaces 30+ errors across core and
+    // providers, all the same shape — an optional field assigned a variable
+    // already typed `T | undefined` (`{ signal: someOptionalSignal }` against
+    // `signal?: AbortSignal`), which is the idiomatic pattern used throughout
+    // this codebase rather than a bug. Enabling it for real means auditing and
+    // widening every such interface to `field?: T | undefined`, which is real,
+    // valuable work — just not a drive-by lint change.
+    "exactOptionalPropertyTypes": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "types": ["node", "vscode", "mocha"]
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "out",
+    // Both halves of the webview — source and tests — need the DOM lib and JSX,
+    // so they are typechecked by src/webview/tsconfig.json instead.
+    "src/webview/**",
+    "tests/webview/**",
+    "tests/fixtures/**"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "node-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fixture for manual testing. Pins are deliberately old, deprecated or vulnerable.",
+  "dependencies": {
+    "express": "^4.18.0",
+    "lodash": "4.17.15",
+    "request": "^2.88.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "optionalDependencies": {
+    "fsevents": "^2.3.0"
+  }
+}

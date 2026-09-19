@@ -1,0 +1,6 @@
+# Deliberately mixes pins, ranges and directives to exercise the parser.
+--index-url https://pypi.org/simple
+
+flask>=2,<3
+jinja2==3.1.2  # pinned on purpose
+pyyaml

@@ -1,0 +1,326 @@
+{
+  "name": "orizzonte-vscode",
+  "displayName": "Orizzonte - Universal Visual Package Manager",
+  "description": "Universal Visual Package Manager for Visual Studio Code",
+  "icon": "resources/orizzonte.png",
+  "version": "1.0.0",
+  "packageManager": "pnpm@11.23.0",
+  "publisher": "orizzonte",
+  "license": "MIT",
+  "author": "Salvatore Corvaglia",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/salvatorecorvaglia/orizzonte"
+  },
+  "engines": {
+    "node": ">=22.13.0",
+    "vscode": "^1.107.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "keywords": [
+    "dependencies",
+    "package manager",
+    "npm",
+    "pip",
+    "cargo"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/package.json",
+    "workspaceContains:**/pyproject.toml",
+    "workspaceContains:**/requirements.txt",
+    "workspaceContains:**/Cargo.toml",
+    "workspaceContains:**/go.mod",
+    "workspaceContains:**/composer.json",
+    "workspaceContains:**/pom.xml",
+    "workspaceContains:**/build.gradle",
+    "workspaceContains:**/build.gradle.kts"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "restrictedConfigurations": [
+        "orizzonte.registryOverrides"
+      ]
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "orizzonte.open",
+        "title": "Open Dependency Panel",
+        "category": "Orizzonte",
+        "icon": "$(package)"
+      },
+      {
+        "command": "orizzonte.refresh",
+        "title": "Refresh Dependencies",
+        "category": "Orizzonte",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "orizzonte.checkUpdates",
+        "title": "Check for Updates",
+        "category": "Orizzonte",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "orizzonte.updateAll",
+        "title": "Update All Dependencies",
+        "category": "Orizzonte",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "orizzonte.searchInstall",
+        "title": "Search & Install Package",
+        "category": "Orizzonte",
+        "icon": "$(search)"
+      },
+      {
+        "command": "orizzonte.showWhy",
+        "title": "Why Is This Installed?",
+        "category": "Orizzonte",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "orizzonte.exportReport",
+        "title": "Export Dependency Report",
+        "category": "Orizzonte",
+        "icon": "$(export)"
+      },
+      {
+        "command": "orizzonte.focusDependencyFromLens",
+        "title": "Focus Dependency (from CodeLens)",
+        "category": "Orizzonte"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "orizzonte",
+          "title": "Orizzonte",
+          "icon": "resources/orizzonte.svg"
+        }
+      ]
+    },
+    "views": {
+      "orizzonte": [
+        {
+          "type": "webview",
+          "id": "orizzonte.sidebar",
+          "name": "Orizzonte",
+          "contextualTitle": "Orizzonte",
+          "icon": "resources/orizzonte.svg"
+        }
+      ]
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "orizzonte.focusDependencyFromLens",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "orizzonte.open",
+          "when": "view == orizzonte.sidebar",
+          "group": "navigation@1"
+        },
+        {
+          "command": "orizzonte.searchInstall",
+          "when": "view == orizzonte.sidebar",
+          "group": "navigation@2"
+        },
+        {
+          "command": "orizzonte.checkUpdates",
+          "when": "view == orizzonte.sidebar",
+          "group": "navigation@3"
+        },
+        {
+          "command": "orizzonte.refresh",
+          "when": "view == orizzonte.sidebar",
+          "group": "navigation@4"
+        },
+        {
+          "command": "orizzonte.updateAll",
+          "when": "view == orizzonte.sidebar",
+          "group": "1_modify@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Orizzonte",
+      "properties": {
+        "orizzonte.autoCheckUpdates": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically check registries for newer versions when the panel opens and when manifests change."
+        },
+        "orizzonte.checkIntervalMinutes": {
+          "type": "number",
+          "default": 60,
+          "minimum": 0,
+          "maximum": 10080,
+          "description": "How often to re-check registries in the background, in minutes. Set to 0 to disable periodic checks; the maximum is 10080 (7 days)."
+        },
+        "orizzonte.enableAudit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Query OSV.dev for known vulnerabilities affecting your dependencies."
+        },
+        "orizzonte.preferredNodeManager": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "npm",
+            "yarn",
+            "pnpm",
+            "bun"
+          ],
+          "default": "auto",
+          "description": "Which Node package manager to use. 'auto' detects it from lockfiles and the packageManager field."
+        },
+        "orizzonte.pythonManager": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "pip",
+            "uv",
+            "poetry"
+          ],
+          "default": "auto",
+          "description": "Which Python package manager to use. 'auto' detects it from lockfiles and pyproject.toml."
+        },
+        "orizzonte.excludeGlobs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/.venv/**",
+            "**/venv/**",
+            "**/target/**",
+            "**/vendor/**",
+            "**/dist/**",
+            "**/build/**",
+            "**/.git/**",
+            "**/.vscode-test/**",
+            "**/test/**",
+            "**/tests/**",
+            "**/fixtures/**",
+            "**/__tests__/**"
+          ],
+          "description": "Glob patterns to skip when scanning for manifest files."
+        },
+        "orizzonte.registryOverrides": {
+          "type": "object",
+          "default": {},
+          "description": "Override registry base URLs per ecosystem. A value can be a bare URL, e.g. { \"npm\": \"https://registry.mycompany.com\" }, or an object naming an environment variable that holds a bearer token for that registry, e.g. { \"npm\": { \"url\": \"https://registry.mycompany.com\", \"tokenEnvVar\": \"COMPANY_NPM_TOKEN\" } } — Orizzonte reads the token from that variable at request time and never stores it. Ignored in untrusted workspaces.",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "tokenEnvVar": {
+                    "type": "string",
+                    "description": "Name of an environment variable holding a bearer token for this registry. The variable itself must be set wherever VS Code runs, e.g. in your shell profile."
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "orizzonte.contactEmail": {
+          "type": "string",
+          "default": "",
+          "description": "Optional contact email included in the User-Agent sent to registries. Packagist requests one so they can reach you about unusual traffic."
+        },
+        "orizzonte.licenseAllowList": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "If non-empty, only these licenses (e.g. \"MIT\", \"Apache-2.0\") pass the License summary check — everything else, including an unrecognized license, is flagged. Takes precedence over licenseDenyList."
+        },
+        "orizzonte.licenseDenyList": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Licenses (e.g. \"GPL-3.0\") to flag in the License summary check. Ignored when licenseAllowList is set."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run build",
+    "build": "pnpm run build:host && pnpm run build:webview",
+    "build:host": "node esbuild.config.mjs --production",
+    "build:webview": "vite build",
+    "watch": "concurrently \"node esbuild.config.mjs --watch\" \"vite build --watch\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/webview/tsconfig.json",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "pretest:integration": "pnpm run build && tsc -p tsconfig.integration.json",
+    "test:integration": "vscode-test",
+    "test:all": "pnpm run test && pnpm run test:integration",
+    "package": "vsce package --no-dependencies",
+    "publish:ovsx": "ovsx publish *.vsix"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.11.1",
+    "jsonc-parser": "^3.3.1",
+    "semver": "^7.8.5",
+    "smol-toml": "^1.8.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@tanstack/react-virtual": "^3.14.11",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^26.4.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@types/semver": "^7.8.0",
+    "@types/vscode": "~1.107.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "@vitest/coverage-v8": "^5.0.0",
+    "@vscode/codicons": "0.0.46-24",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.9.2",
+    "concurrently": "^10.0.5",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
+    "ovsx": "^1.1.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
+  }
+}

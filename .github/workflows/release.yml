@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: 'Create a draft release'
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Create a prerelease'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  validate:
+    name: Validate Tag Ref & Package Version
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Validate tag format and version match
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+            PKG_VERSION=$(jq -r .version package.json)
+            echo "Tag version: $TAG_VERSION | package.json version: $PKG_VERSION"
+            if [[ "$TAG_VERSION" != "$PKG_VERSION" ]]; then
+              echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+              exit 1
+            fi
+          fi
+
+  verify:
+    name: Verify
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Unit tests
+        run: pnpm run test
+
+  release:
+    name: Release
+    needs: [validate, verify]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package extension
+        run: pnpm run package
+
+      - name: Extract Release Notes from CHANGELOG.md
+        run: |
+          node -e '
+          const fs = require("fs");
+          const tag = process.env.GITHUB_REF_NAME || "";
+          const version = tag.replace(/^v/, "");
+          if (fs.existsSync("CHANGELOG.md") && version) {
+            const content = fs.readFileSync("CHANGELOG.md", "utf8");
+            const escapedVer = version.replace(/\./g, "\\.");
+            const regex = new RegExp("##\\s*\\[?v?" + escapedVer + "\\]?[^\\n]*\\n([\\s\\S]*?)(?=\\n##\\s|$)", "i");
+            const match = content.match(regex);
+            if (match && match[1].trim()) {
+              fs.writeFileSync("RELEASE_NOTES.md", match[1].trim());
+              console.log("Extracted release notes for version " + version);
+              process.exit(0);
+            }
+          }
+          console.log("No changelog entry found for version " + version);
+          '
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: Orizzonte ${{ github.ref_name }}
+          files: '*.vsix'
+          body_path: ${{ hashFiles('RELEASE_NOTES.md') != '' && 'RELEASE_NOTES.md' || '' }}
+          generate_release_notes: false
+          draft: ${{ github.event.inputs.draft || false }}
+          prerelease: ${{ github.event.inputs.prerelease || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+
+      - name: Publish to Open VSX
+        if: ${{ !(github.event.inputs.draft == 'true' || github.event.inputs.draft == true) }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          EXTRA_ARGS=""
+          if [[ "${{ github.event.inputs.prerelease || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}" == "true" ]]; then
+            EXTRA_ARGS="--pre-release"
+          fi
+          pnpm exec ovsx publish *.vsix $EXTRA_ARGS
+
