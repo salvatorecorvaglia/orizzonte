@@ -292,7 +292,7 @@
     "fast-xml-parser": "^5.11.1",
     "jsonc-parser": "^3.3.1",
     "semver": "^7.8.5",
-    "smol-toml": "^1.8.0",
+    "smol-toml": "^1.9.0",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
@@ -308,7 +308,7 @@
     "@types/semver": "^7.8.0",
     "@types/vscode": "~1.107.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "@vitest/coverage-v8": "^5.0.1",
+    "@vitest/coverage-v8": "^5.0.2",
     "@vscode/codicons": "0.0.46-24",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
@@ -320,7 +320,7 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.0",
-    "vitest": "^5.0.1"
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
   }
 }
