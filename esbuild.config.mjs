@@ -1,27 +1,4 @@
-import { cp, mkdir } from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
 import * as esbuild from 'esbuild';
-
-/**
- * Copy the codicon font and stylesheet into `dist/`.
- *
- * The Activity Bar view is a hand-written HTML string rather than part of the
- * Vite bundle, so it cannot reach the copy Vite inlines into the panel's
- * stylesheet — and `node_modules` is excluded from the published .vsix, so it
- * cannot reach the package either. Copying the two files it needs into `dist`
- * lets that view keep a `localResourceRoots` grant of exactly the directory it
- * loads from, which is the property `sidebarProvider` was careful to establish.
- */
-async function copyCodicons() {
-  const require = createRequire(import.meta.url);
-  const source = dirname(require.resolve('@vscode/codicons/package.json'));
-  const target = 'dist/codicons';
-  await mkdir(target, { recursive: true });
-  for (const file of ['codicon.css', 'codicon.ttf']) {
-    await cp(join(source, 'dist', file), join(target, file));
-  }
-}
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -54,8 +31,6 @@ const options = {
   minify: production,
   logLevel: 'info',
 };
-
-await copyCodicons();
 
 if (watch) {
   const ctx = await esbuild.context(options);

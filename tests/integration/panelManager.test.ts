@@ -6,7 +6,7 @@
  * does not throw; it never sends a message into the resulting panel.
  *
  * `vscode.window.createWebviewPanel` is called internally by `reveal()`, so
- * — unlike `SidebarViewProvider.resolveWebviewView`, which takes a webview
+ * — unlike a `WebviewViewProvider.resolveWebviewView`, which takes a webview
  * as a parameter — there is no way to hand `PanelManager` a fake one.
  * Instead this intercepts `createWebviewPanel` itself for the duration of
  * one `reveal()` call, wrapping the real panel's `webview.onDidReceiveMessage`
@@ -24,7 +24,11 @@ import { type Memento, TtlCache } from '../../src/core/cache.js';
 import { HttpClient } from '../../src/core/http.js';
 import type { HostMessage, WebviewMessage } from '../../src/core/protocol.js';
 import { Scanner, type ScanResult } from '../../src/core/scanner.js';
-import type { Dependency, ProjectGroup } from '../../src/core/types.js';
+import type {
+  Dependency,
+  PackageMeta,
+  ProjectGroup,
+} from '../../src/core/types.js';
 import { createProviderContext } from '../../src/core/workspace.js';
 import { PanelManager } from '../../src/ui/panelManager.js';
 
@@ -122,6 +126,7 @@ function emptyScanResult(): ScanResult {
   return {
     groups: [],
     manifestPaths: [],
+    manifests: [],
     summary: {
       totalDependencies: 0,
       outdated: 0,
@@ -193,6 +198,7 @@ describe('PanelManager message handling', () => {
     manager.setResult({
       groups: [group],
       manifestPaths: [group.manifestPath],
+      manifests: [],
       summary: {
         totalDependencies: 1,
         outdated: 0,
@@ -250,6 +256,7 @@ describe('PanelManager message handling', () => {
         },
       ],
       manifestPaths: [manifestPath],
+      manifests: [],
       summary: {
         totalDependencies: 0,
         outdated: 0,
@@ -310,6 +317,54 @@ describe('PanelManager message handling', () => {
     assert.deepEqual(manager.currentResult, emptyScanResult());
   });
 
+  it("keeps a row's fetched details across a rescan, but not its version facts", () => {
+    // Every file-watcher refresh rebuilt the rows without the description and
+    // license the drawer had fetched, and the open drawer went blank.
+    manager = makeManager();
+    const row = (meta?: PackageMeta): Dependency => ({
+      key: '/p/package.json::prod::react',
+      name: 'react',
+      ecosystem: 'node',
+      scope: 'prod',
+      declared: '^18.0.0',
+      updateKind: 'none',
+      vulnerabilities: [],
+      manifestPath: '/p/package.json',
+      projectLabel: 'p',
+      ...(meta ? { meta } : {}),
+    });
+    const result = (dep: Dependency): ScanResult => ({
+      ...emptyScanResult(),
+      groups: [
+        {
+          label: 'p',
+          manifestPath: '/p/package.json',
+          ecosystem: 'node',
+          toolchain: 'npm',
+          dependencies: [dep],
+        },
+      ],
+    });
+
+    manager.setResult(
+      result(
+        row({
+          name: 'react',
+          description: 'A JavaScript library',
+          license: 'MIT',
+          deprecated: 'old notice',
+        }),
+      ),
+    );
+    manager.setResult(result(row()));
+
+    const meta = manager.currentResult.groups[0].dependencies[0].meta;
+    assert.equal(meta?.description, 'A JavaScript library');
+    assert.equal(meta?.license, 'MIT');
+    // Deprecation is a fact of the version lookup, which the new scan owns.
+    assert.equal(meta?.deprecated, undefined);
+  });
+
   it('answers "requestDuplicates" from a real lockfile on disk', async () => {
     manager = makeManager();
 
@@ -344,6 +399,7 @@ describe('PanelManager message handling', () => {
         },
       ],
       manifestPaths: [manifestPath],
+      manifests: [],
       summary: {
         totalDependencies: 0,
         outdated: 0,
@@ -401,6 +457,99 @@ describe('PanelManager message handling', () => {
   });
 
   /*
+   * A second request supersedes the first. A slow first answer arriving after
+   * the user asked again — or closed and reopened the panel — would otherwise
+   * overwrite the newer result, or post into a panel that moved on.
+   */
+  it('answers only the newest of two overlapping license requests', async () => {
+    manager = makeManager();
+    manager.setResult(emptyScanResult());
+
+    const intercept = interceptNextPanel();
+    try {
+      manager.reveal();
+      const { receive, posted } = await intercept.ready;
+      receive({ type: 'ready' });
+      await waitForMessage(posted, 'state');
+
+      receive({ type: 'requestLicenses', requestId: 'first' });
+      receive({ type: 'requestLicenses', requestId: 'second' });
+      await waitForMessage(posted, 'licenseSummary');
+      // Long enough for a superseded answer to have landed, had it been sent.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const answers = posted.filter(
+        (message) => message.type === 'licenseSummary',
+      );
+      assert.deepEqual(
+        answers.map((message) => message.requestId),
+        ['second'],
+      );
+    } finally {
+      intercept.restore();
+    }
+  });
+
+  it('answers only the newest of two overlapping duplicate checks', async () => {
+    manager = makeManager();
+    manager.setResult(emptyScanResult());
+
+    const intercept = interceptNextPanel();
+    try {
+      manager.reveal();
+      const { receive, posted } = await intercept.ready;
+      receive({ type: 'ready' });
+      await waitForMessage(posted, 'state');
+
+      receive({ type: 'requestDuplicates', requestId: 'first' });
+      receive({ type: 'requestDuplicates', requestId: 'second' });
+      await waitForMessage(posted, 'duplicateVersions');
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const answers = posted.filter(
+        (message) => message.type === 'duplicateVersions',
+      );
+      assert.deepEqual(
+        answers.map((message) => message.requestId),
+        ['second'],
+      );
+    } finally {
+      intercept.restore();
+    }
+  });
+
+  it('drops a malformed message at the boundary, without answering or failing', async () => {
+    manager = makeManager();
+    manager.setResult(emptyScanResult());
+
+    const intercept = interceptNextPanel();
+    try {
+      manager.reveal();
+      const { receive, posted } = await intercept.ready;
+      receive({ type: 'ready' });
+      await waitForMessage(posted, 'state');
+      const before = posted.length;
+
+      // Missing its requestId: a well-typed webview never sends this.
+      receive({ type: 'requestLicenses' } as unknown as WebviewMessage);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // The loaded webview announces itself on its own schedule, and the
+      // host answers with `state` and `scanning`; neither is a reply to the
+      // malformed message. A reply would be one of these.
+      const replies = posted
+        .slice(before)
+        .map((message) => message.type)
+        .filter((type) =>
+          ['licenseSummary', 'panelRequestFailed', 'error'].includes(type),
+        );
+      assert.deepEqual(replies, [], 'the malformed message was answered');
+    } finally {
+      intercept.restore();
+    }
+  });
+
+  /*
    * A dependency with no `meta` yet (details never fetched) has no
    * repository to check, so this proves the message is wired end to end
    * without ever reaching the network — the changelog fetch itself is
@@ -433,6 +582,7 @@ describe('PanelManager message handling', () => {
         },
       ],
       manifestPaths: ['/does/not/matter/package.json'],
+      manifests: [],
       summary: {
         totalDependencies: 1,
         outdated: 1,

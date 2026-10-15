@@ -90,3 +90,57 @@ describe('buildLicenseSummary', () => {
     expect(summary.groups[0].flagged).toBe(true);
   });
 });
+
+describe('SPDX expressions', () => {
+  const allow = { allow: ['MIT', 'Apache-2.0'], deny: [] };
+  const deny = { allow: [], deny: ['GPL-3.0'] };
+
+  it('passes a dual license when either side is allowed', () => {
+    expect(isLicenseFlagged('MIT OR Apache-2.0', allow)).toBe(false);
+    expect(isLicenseFlagged('(MIT OR GPL-3.0)', allow)).toBe(false);
+    // Cargo's pre-SPDX spelling of the same thing.
+    expect(isLicenseFlagged('MIT/Apache-2.0', allow)).toBe(false);
+  });
+
+  it('needs every side of a conjunction', () => {
+    expect(isLicenseFlagged('MIT AND Zlib', allow)).toBe(true);
+    expect(isLicenseFlagged('(MIT AND Apache-2.0)', allow)).toBe(false);
+  });
+
+  it('judges a license WITH an exception by the license', () => {
+    expect(isLicenseFlagged('Apache-2.0 WITH LLVM-exception', allow)).toBe(
+      false,
+    );
+    expect(isLicenseFlagged('GPL-3.0 WITH Classpath-exception-2.0', deny)).toBe(
+      true,
+    );
+  });
+
+  it('matches -only and -or-later variants to the base identifier', () => {
+    expect(isLicenseFlagged('GPL-3.0-or-later', deny)).toBe(true);
+    expect(isLicenseFlagged('GPL-3.0-only', deny)).toBe(true);
+    expect(isLicenseFlagged('GPL-2.0-only', deny)).toBe(false);
+  });
+
+  it('lets a deny list pass a dual license with an acceptable side', () => {
+    expect(isLicenseFlagged('GPL-3.0 OR MIT', deny)).toBe(false);
+    expect(isLicenseFlagged('GPL-3.0 AND MIT', deny)).toBe(true);
+  });
+
+  it('reads PyPI classifier names as their SPDX identifiers', () => {
+    expect(isLicenseFlagged('MIT License', allow)).toBe(false);
+    expect(isLicenseFlagged('Apache Software License', allow)).toBe(false);
+    expect(
+      isLicenseFlagged('GNU General Public License v3 (GPLv3)', deny),
+    ).toBe(true);
+  });
+
+  it('still matches free text it cannot parse as a whole', () => {
+    expect(
+      isLicenseFlagged('BSD 3-Clause License', {
+        allow: ['BSD 3-Clause License'],
+        deny: [],
+      }),
+    ).toBe(false);
+  });
+});

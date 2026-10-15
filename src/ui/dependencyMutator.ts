@@ -7,6 +7,7 @@
  * copies of it in `PanelManager`.
  */
 
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { Dependency, DepScope, Toolchain } from '../core/types.js';
 import type {
@@ -105,17 +106,22 @@ export class DependencyMutator {
     });
   }
 
-  /** Runs the provider's bulk-update command. False when it has none. */
-  async updateAll(
+  /**
+   * The provider's bulk-update command for `manifestPath`, or null when the
+   * ecosystem has none. Separate from running it so the host can word its
+   * confirmation around what the command will actually do.
+   */
+  async bulkUpdateCommand(
     provider: EcosystemProvider,
     manifestPath: string,
-  ): Promise<boolean> {
+  ): Promise<Command | null> {
     const toolchain = await provider.detectToolchain(manifestPath, this.ctx);
-    const command = provider.updateAllCommand(toolchain);
-    if (!command) return false;
+    return provider.updateAllCommand(toolchain);
+  }
 
+  /** Runs a command from `bulkUpdateCommand`. */
+  async runBulkUpdate(command: Command): Promise<void> {
     await this.runCommand(command.argv, command.cwd, command.description);
-    return true;
   }
 
   /**
@@ -141,6 +147,13 @@ export class DependencyMutator {
    * Runs `command` (if given) and applies a manifest edit as either its
    * build-or-fallback: the edit lands when the command does not write the
    * manifest itself, or in place of the command when there is none.
+   *
+   * False means the manifest does not reflect the change and the user has to
+   * make it by hand — including when the command ran but the paired edit
+   * could not be made (pip beside a pyproject.toml), which used to report
+   * success and leave the manifest silently out of step with the environment.
+   * A command that *failed* is not followed by its edit: recording a package
+   * the install just refused would leave the manifest claiming it anyway.
    */
   private async apply(
     provider: EcosystemProvider,
@@ -149,11 +162,13 @@ export class DependencyMutator {
     edit: ManifestEdit,
   ): Promise<boolean> {
     if (command) {
-      await this.runCommand(command.argv, command.cwd, command.description);
-      if (command.writesManifest === false) {
-        await this.applyManifestEdit(provider, manifestPath, edit);
-      }
-      return true;
+      const succeeded = await this.runCommand(
+        command.argv,
+        command.cwd,
+        command.description,
+      );
+      if (command.writesManifest !== false || !succeeded) return true;
+      return this.applyManifestEdit(provider, manifestPath, edit);
     }
 
     return this.applyManifestEdit(provider, manifestPath, edit);
@@ -176,7 +191,7 @@ export class DependencyMutator {
     argv: string[],
     cwd: string,
     description: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const doneBusy = this.beginBusy(description);
     let exitCode: number | undefined;
     try {
@@ -189,7 +204,9 @@ export class DependencyMutator {
       this.onCommandFailed(
         `${argv.join(' ')} failed with exit code ${exitCode}. See the Orizzonte terminal for details.`,
       );
+      return false;
     }
+    return true;
   }
 
   /**
@@ -207,7 +224,11 @@ export class DependencyMutator {
     const document = await vscode.workspace.openTextDocument(uri);
     const versionBeforeEdit = document.version;
     const wasDirty = document.isDirty;
-    const updated = provider.editManifest(document.getText(), edit);
+    const updated = provider.editManifest(
+      document.getText(),
+      edit,
+      path.basename(manifestPath),
+    );
     if (updated === null) return false;
 
     // A whole-document replace built from a snapshot is only safe against

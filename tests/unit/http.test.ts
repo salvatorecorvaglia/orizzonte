@@ -75,21 +75,35 @@ describe('HttpClient', () => {
       expect(agent).toContain('github.com/salvatorecorvaglia/orizzonte');
     });
 
-    it('carries a contact address when one is configured, as Packagist asks', async () => {
+    it('carries a contact address to Packagist, which asks for one', async () => {
       const calls = stubFetch();
       const client = new HttpClient('1.0.0', 'dev@example.com');
-      await client.getJson('https://example.com/a');
+      await client.getJson('https://repo.packagist.org/p2/a/b.json');
 
       expect(
         (calls[0].init.headers as Record<string, string>)['User-Agent'],
       ).toContain('mailto=dev@example.com');
     });
 
+    it('keeps the contact address from every other host', async () => {
+      // It used to go to GitHub, OSV and deps.dev too.
+      const calls = stubFetch();
+      const client = new HttpClient('1.0.0', 'dev@example.com');
+      await client.getJson('https://api.osv.dev/v1/vulns/x');
+      await client.getJson('https://api.github.com/repos/a/b/releases');
+
+      for (const call of calls) {
+        expect(
+          (call.init.headers as Record<string, string>)['User-Agent'],
+        ).not.toContain('dev@example.com');
+      }
+    });
+
     it('picks up a contact address added after construction', async () => {
       const calls = stubFetch();
       const client = new HttpClient('1.0.0');
       client.setContactEmail('1.0.0', 'later@example.com');
-      await client.getJson('https://example.com/a');
+      await client.getJson('https://packagist.org/search.json?q=x');
 
       expect(
         (calls[0].init.headers as Record<string, string>)['User-Agent'],

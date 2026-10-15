@@ -329,29 +329,27 @@ describe('severity markers', () => {
   });
 });
 
-describe('metaVersions', () => {
+describe('fetched details', () => {
   /*
-   * Regression test for a stale-render bug: App.tsx merges lazily fetched
-   * metadata by mutating `dep.meta` in place (to avoid re-sorting the table),
-   * which means `dep`'s object identity never changes. DepRow is wrapped in
-   * `React.memo`, so without some other prop that actually changes value, the
-   * row would silently keep rendering its old (pre-fetch) content forever.
-   * `metaVersions` is that prop.
+   * Details fetched after the scan arrive as an overlay keyed by row, not as a
+   * change to `groups` — rebuilding the groups would re-sort the table under
+   * the pointer. The row has to show them all the same, memoised or not.
    */
-  it('re-renders a row after its mutated-in-place meta gains a size', () => {
-    const groups = [group([dep({ name: 'pkg', key: 'k' })])];
-    const { rerender } = renderTable(groups, undefined, {
-      metaVersions: { k: 0 },
-    });
+  it('shows a size that arrived after the scan, without moving the row', () => {
+    const groups = [
+      group([
+        dep({ name: 'a-first', key: 'a' }),
+        dep({ name: 'b-second', key: 'b' }),
+      ]),
+    ];
+    const { rerender } = renderTable(groups);
 
-    const sizeCellBefore = screen
-      .getAllByRole('gridcell')
-      .find((cell) => cell.className.includes('cell--size'));
-    expect(sizeCellBefore?.textContent).toBe('—');
-
-    // Simulate App.tsx's in-place merge: same `dep`/`groups` object identity,
-    // only the `meta` field and the row's version counter change.
-    groups[0].dependencies[0].meta = { name: 'pkg', sizeBytes: 2048 };
+    const sizeOf = (name: string) =>
+      screen
+        .getByText(name)
+        .closest('[role="row"]')
+        ?.querySelector('.cell--size')?.textContent;
+    expect(sizeOf('b-second')).toBe('—');
 
     rerender(
       <DepTable
@@ -366,14 +364,18 @@ describe('metaVersions', () => {
         loading={false}
         filtering={false}
         onClearFilters={noop}
-        metaVersions={{ k: 1 }}
+        metaByKey={{ b: { name: 'b-second', sizeBytes: 2048 } }}
       />,
     );
 
-    const sizeCellAfter = screen
-      .getAllByRole('gridcell')
-      .find((cell) => cell.className.includes('cell--size'));
-    expect(sizeCellAfter?.textContent).toBe('2.0 KB');
+    expect(sizeOf('b-second')).toBe('2.0 KB');
+    // Nothing was mutated: the scan's row still has no details of its own.
+    expect(groups[0].dependencies[1].meta).toBeUndefined();
+    const names = screen
+      .getAllByRole('row')
+      .map((row) => row.querySelector('[data-package-name]')?.textContent)
+      .filter(Boolean);
+    expect(names).toEqual(['a-first', 'b-second']);
   });
 });
 

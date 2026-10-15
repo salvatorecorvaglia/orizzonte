@@ -19,11 +19,18 @@
 
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { describeError } from '../core/errors.js';
 import { findDeclaration } from '../core/findDeclaration.js';
 import type { HostMessage, WebviewMessage } from '../core/protocol.js';
 import type { Scanner, ScanResult } from '../core/scanner.js';
-import type { Dependency, DepScope, ProjectGroup } from '../core/types.js';
-import { hasUpdate } from '../core/vocabulary.js';
+import type {
+  Dependency,
+  DepScope,
+  PackageMeta,
+  ProjectGroup,
+} from '../core/types.js';
+import { compareVersions } from '../core/versions/index.js';
+import { hasUpdate, isUpdatable } from '../core/vocabulary.js';
 import {
   findDependency,
   isKnownManifest,
@@ -44,6 +51,7 @@ export class PanelManager implements vscode.Disposable {
   private latest: ScanResult = {
     groups: [],
     manifestPaths: [],
+    manifests: [],
     summary: {
       totalDependencies: 0,
       outdated: 0,
@@ -121,11 +129,13 @@ export class PanelManager implements vscode.Disposable {
 
   /** Pushes a new scan result to the webview and the tree view. */
   setResult(result: ScanResult): void {
+    carryOverDetails(this.latest, result);
     this.latest = result;
     this.post({
       type: 'state',
       groups: result.groups,
       summary: result.summary,
+      manifests: result.manifests,
     });
     this.onStateChanged(result);
   }
@@ -179,6 +189,7 @@ export class PanelManager implements vscode.Disposable {
           type: 'state',
           groups: this.latest.groups,
           summary: this.latest.summary,
+          manifests: this.latest.manifests,
         });
         this.post({
           type: 'scanning',
@@ -423,28 +434,38 @@ export class PanelManager implements vscode.Disposable {
     );
     if (choice !== 'Update') return;
 
-    // Named rather than counted: a package Orizzonte cannot rewrite is the one
-    // the user has to go and edit by hand, so it has to be identifiable.
+    await this.runUpdates(resolved);
+    await this.refresh();
+  }
+
+  /**
+   * Updates each entry in turn and reports, by name, the ones that did not.
+   *
+   * Two different outcomes, reported differently: a package declared in a
+   * form Orizzonte will not rewrite (the user edits it by hand), and one whose
+   * update threw (something went wrong, and the message says what). Both used
+   * to be reported as the first.
+   */
+  private async runUpdates(
+    entries: Array<{ dep: Dependency; toVersion: string }>,
+  ): Promise<void> {
     const skipped: string[] = [];
+    const failed: string[] = [];
     // One detection per project for the whole batch, not one per package.
     const toolchains: ToolchainCache = new Map();
-    for (const entry of resolved) {
+    for (const entry of entries) {
       try {
-        if (
-          !(await this.mutator.update(
-            entry.dep,
-            providerFor(entry.dep.ecosystem),
-            entry.toVersion,
-            toolchains,
-          ))
-        ) {
-          skipped.push(entry.dep.name);
-        }
-      } catch {
-        // One package failing to update (terminal disposed mid-run, a
-        // manifest edit that throws) should not abandon the rest of the
-        // batch — it's reported the same way a declined rewrite is.
-        skipped.push(entry.dep.name);
+        const applied = await this.mutator.update(
+          entry.dep,
+          providerFor(entry.dep.ecosystem),
+          entry.toVersion,
+          toolchains,
+        );
+        if (!applied) skipped.push(entry.dep.name);
+      } catch (error) {
+        // One package failing (terminal disposed mid-run, a manifest edit that
+        // throws) should not abandon the rest of the batch.
+        failed.push(`${entry.dep.name} (${describeError(error)})`);
       }
     }
 
@@ -453,10 +474,15 @@ export class PanelManager implements vscode.Disposable {
         type: 'error',
         message:
           `Could not update ${skipped.join(', ')} automatically — ` +
-          `declared in a form Orizzonte cannot rewrite safely.`,
+          `declared in a form Orizzonte cannot rewrite safely. Edit the manifest by hand.`,
       });
     }
-    await this.refresh();
+    if (failed.length > 0) {
+      this.post({
+        type: 'error',
+        message: `Updating ${failed.join(', ')} failed.`,
+      });
+    }
   }
 
   private async handleBulkUninstall(depKeys: string[]): Promise<void> {
@@ -475,6 +501,7 @@ export class PanelManager implements vscode.Disposable {
     if (choice !== 'Remove') return;
 
     const skipped: string[] = [];
+    const failed: string[] = [];
     const toolchains: ToolchainCache = new Map();
     for (const dep of deps) {
       try {
@@ -487,21 +514,36 @@ export class PanelManager implements vscode.Disposable {
         ) {
           skipped.push(dep.name);
         }
-      } catch {
-        skipped.push(dep.name);
+      } catch (error) {
+        failed.push(`${dep.name} (${describeError(error)})`);
       }
     }
 
     if (skipped.length > 0) {
       this.post({
         type: 'error',
-        message: `Could not remove ${skipped.join(', ')} automatically.`,
+        message: `Could not remove ${skipped.join(', ')} automatically. Edit the manifest by hand.`,
+      });
+    }
+    if (failed.length > 0) {
+      this.post({
+        type: 'error',
+        message: `Removing ${failed.join(', ')} failed.`,
       });
     }
     await this.refresh();
   }
 
-  /** Also invoked from the `orizzonte.updateAll` command, not just the webview. */
+  /**
+   * Updates one project. Also invoked from the `orizzonte.updateAll` command,
+   * not just the webview.
+   *
+   * What is promised depends on what will run. Most ecosystems' own command
+   * stays within the declared ranges, so the dialog counts only the packages
+   * that can move inside them and says the rest need a range change. One that
+   * goes to the latest releases counts everything. An ecosystem with no such
+   * command (Gradle) is updated package by package to the latest release.
+   */
   async updateAll(manifestPath: string): Promise<void> {
     const group = this.latest.groups.find(
       (candidate) => candidate.manifestPath === manifestPath,
@@ -517,27 +559,83 @@ export class PanelManager implements vscode.Disposable {
       return;
     }
 
-    const majors = outdated.filter((dep) => dep.updateKind === 'major');
-    const detail = majorUpgradeDetail(outdated.length, majors.length);
+    const provider = providerFor(group.ecosystem);
+    const command = await this.mutator.bulkUpdateCommand(
+      provider,
+      manifestPath,
+    );
 
+    if (command?.reach === 'ranges') {
+      const movable = outdated.filter(movesWithinRange);
+      const beyond = outdated.length - movable.length;
+      const beyondNote =
+        beyond > 0
+          ? ` ${beyond} newer release(s) outside the declared ranges, majors included, are not part of this — select those rows and use Update Selected.`
+          : '';
+
+      if (movable.length === 0) {
+        this.post({
+          type: 'notice',
+          message: `Everything in ${group.label} is already at the newest version its declared range allows.${beyondNote}`,
+        });
+        return;
+      }
+
+      const choice = await vscode.window.showWarningMessage(
+        `Update ${group.label} within its declared ranges?`,
+        {
+          modal: true,
+          detail: `${movable.length} package(s) can move within their declared ranges.${beyondNote}`,
+        },
+        'Update',
+      );
+      if (choice !== 'Update') return;
+
+      await this.mutator.runBulkUpdate(command);
+      await this.refresh();
+      return;
+    }
+
+    if (command) {
+      const majors = outdated.filter((dep) => dep.updateKind === 'major');
+      const choice = await vscode.window.showWarningMessage(
+        `Update all dependencies in ${group.label} to their latest releases?`,
+        {
+          modal: true,
+          detail: majorUpgradeDetail(outdated.length, majors.length),
+        },
+        'Update',
+      );
+      if (choice !== 'Update') return;
+
+      await this.mutator.runBulkUpdate(command);
+      await this.refresh();
+      return;
+    }
+
+    // No bulk command: one update per package, to its latest release.
+    const entries = outdated
+      .filter((dep) => isUpdatable(dep) && dep.latest !== undefined)
+      .map((dep) => ({ dep, toVersion: dep.latest as string }));
+    if (entries.length === 0) {
+      this.post({
+        type: 'notice',
+        message: `The outdated packages in ${group.label} are declared in forms Orizzonte cannot rewrite. Edit the manifest by hand.`,
+      });
+      return;
+    }
+    const majors = entries.filter((entry) => entry.dep.updateKind === 'major');
     const choice = await vscode.window.showWarningMessage(
-      `Update all dependencies in ${group.label}?`,
-      { modal: true, detail },
+      `Update all dependencies in ${group.label} to their latest releases?`,
+      {
+        modal: true,
+        detail: majorUpgradeDetail(entries.length, majors.length),
+      },
       'Update',
     );
     if (choice !== 'Update') return;
 
-    const provider = providerFor(group.ecosystem);
-    const applied = await this.mutator.updateAll(provider, manifestPath);
-
-    if (!applied) {
-      this.post({
-        type: 'error',
-        message: `No bulk update command for ${group.ecosystem}.`,
-      });
-      return;
-    }
-
+    await this.runUpdates(entries);
     await this.refresh();
   }
 
@@ -635,9 +733,47 @@ export class PanelManager implements vscode.Disposable {
   }
 }
 
-function describeError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
+/**
+ * Copies the details the drawer fetched onto the same rows in a new result.
+ *
+ * A scan rebuilds every row from the manifests, and the registry details —
+ * description, license, repository — are fetched on demand, one package at a
+ * time, when a row is opened. Without this each rescan (every file-watcher
+ * event, every install) dropped them, and the open drawer went blank.
+ *
+ * Only those details carry over. What the version lookup reports —
+ * deprecation, size — comes from the new scan, so a package that stopped
+ * being deprecated does not stay flagged.
+ */
+function carryOverDetails(previous: ScanResult, next: ScanResult): void {
+  const details = new Map<string, PackageMeta>();
+  for (const group of previous.groups) {
+    for (const dep of group.dependencies) {
+      if (dep.meta) details.set(dep.key, dep.meta);
+    }
+  }
+  if (details.size === 0) return;
+
+  for (const group of next.groups) {
+    for (const dep of group.dependencies) {
+      const old = details.get(dep.key);
+      if (!old) continue;
+      const { deprecated: _deprecated, sizeBytes: _sizeBytes, ...kept } = old;
+      dep.meta = { ...kept, ...dep.meta };
+    }
+  }
+}
+
+/**
+ * Whether the package's own declared range admits a newer release than the
+ * one installed — what a within-ranges bulk update can actually deliver.
+ */
+function movesWithinRange(dep: Dependency): boolean {
+  return (
+    dep.wanted !== undefined &&
+    dep.installed !== undefined &&
+    compareVersions(dep.ecosystem, dep.wanted, dep.installed) > 0
+  );
 }
 
 /** The confirmation dialog detail shared by bulk-update and update-all. */

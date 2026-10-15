@@ -16,6 +16,7 @@
 import * as vscode from 'vscode';
 import { BusyTracker } from '../../core/busyTracker.js';
 import type { HostMessage, WebviewMessage } from '../../core/protocol.js';
+import { isWebviewMessage } from '../../core/webviewMessageGuard.js';
 import { buildContentSecurityPolicy, createNonce } from '../webviewSecurity.js';
 
 export class WebviewHost implements vscode.Disposable {
@@ -111,7 +112,10 @@ export class WebviewHost implements vscode.Disposable {
       this.onDispose?.();
     });
 
-    this.panel.webview.onDidReceiveMessage((message: WebviewMessage) => {
+    this.panel.webview.onDidReceiveMessage((message: unknown) => {
+      // Shape-checked at the boundary, so no handler sees a message missing
+      // the fields its type promises — see `webviewMessageGuard.ts`.
+      if (!isWebviewMessage(message)) return;
       this.onMessage(message);
     });
   }

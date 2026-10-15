@@ -13,17 +13,20 @@
 import * as path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import { cacheKey, TTL } from '../../core/cache.js';
-import { selectLockfile } from '../../core/lockfiles/resolve.js';
+import { readInstalledVersions } from '../../core/lockfiles/installed.js';
+import { ancestorDirectories } from '../../core/lockfiles/resolve.js';
+import { normalizeName } from '../../core/pep503.js';
 import type {
   Dependency,
+  DependencyGroup,
   DepScope,
   PackageMeta,
   ParsedManifest,
   SearchResult,
   Toolchain,
-  ToolchainId,
 } from '../../core/types.js';
 import { maxVersion } from '../../core/versions/index.js';
+import { isUpdatable } from '../../core/vocabulary.js';
 import {
   type Command,
   dependencyKey,
@@ -151,7 +154,12 @@ export class PythonProvider implements EcosystemProvider {
     // reconciliation, so the first declaration wins.
     const seen = new Set<string>();
 
-    const add = (name: string, declared: string, scope: DepScope) => {
+    const add = (
+      name: string,
+      declared: string,
+      scope: DepScope,
+      group?: DependencyGroup,
+    ) => {
       if (!name) return;
       const key = dependencyKey(absolutePath, scope, normalizeName(name));
       if (seen.has(key)) return;
@@ -167,6 +175,10 @@ export class PythonProvider implements EcosystemProvider {
         vulnerabilities: [],
         manifestPath: absolutePath,
         projectLabel,
+        // The table it lives in, not just the scope it maps to: `uv remove`
+        // and `poetry remove` have to be told which group to edit, and
+        // `test`, `lint` and `docs` all collapse onto the same scope.
+        ...(group ? { group } : {}),
       });
     };
 
@@ -184,7 +196,11 @@ export class PythonProvider implements EcosystemProvider {
       const scope = normalizeScope(group);
       for (const entry of entries) {
         const parsed = parseRequirement(entry);
-        if (parsed) add(parsed.name, parsed.specifier, scope);
+        if (parsed)
+          add(parsed.name, parsed.specifier, scope, {
+            kind: 'extra',
+            name: group,
+          });
       }
     }
 
@@ -197,7 +213,11 @@ export class PythonProvider implements EcosystemProvider {
       for (const entry of entries) {
         if (typeof entry !== 'string') continue; // skip {include-group = ...}
         const parsed = parseRequirement(entry);
-        if (parsed) add(parsed.name, parsed.specifier, scope);
+        if (parsed)
+          add(parsed.name, parsed.specifier, scope, {
+            kind: 'group',
+            name: group,
+          });
       }
     }
 
@@ -215,7 +235,10 @@ export class PythonProvider implements EcosystemProvider {
     for (const [group, body] of Object.entries(poetryGroups ?? {})) {
       const scope = normalizeScope(group);
       for (const [name, value] of Object.entries(body.dependencies ?? {})) {
-        add(name, poetryConstraint(value), scope);
+        add(name, poetryConstraint(value), scope, {
+          kind: 'group',
+          name: group,
+        });
       }
     }
     // Poetry's pre-1.2 dev group.
@@ -223,7 +246,7 @@ export class PythonProvider implements EcosystemProvider {
       | Record<string, unknown>
       | undefined;
     for (const [name, value] of Object.entries(legacyDev ?? {})) {
-      add(name, poetryConstraint(value), 'dev');
+      add(name, poetryConstraint(value), 'dev', { kind: 'group', name: 'dev' });
     }
 
     // uv workspace members.
@@ -252,8 +275,8 @@ export class PythonProvider implements EcosystemProvider {
       : 'prod';
     const dependencies: Dependency[] = [];
 
-    for (const rawLine of text.split(/\r?\n/)) {
-      const line = rawLine.split('#')[0].trim();
+    for (const { text: logical } of logicalLines(text.split(/\r?\n/))) {
+      const line = requirementPart(logical);
       if (line === '') continue;
       // Skip includes, editable installs, index URLs and bare flags.
       if (line.startsWith('-') || line.startsWith('--')) continue;
@@ -290,86 +313,96 @@ export class PythonProvider implements EcosystemProvider {
   }
 
   /**
-   * Resolved versions from the nearest lockfile at or above `manifestDir`.
-   *
-   * The walk matters for workspaces, where only the root carries a lockfile —
-   * see `core/lockfiles/resolve.ts`.
+   * Resolved versions from the nearest uv.lock or poetry.lock at or above
+   * `manifestDir` — see `core/lockfiles/installed.ts`. Keyed by PEP 503 name.
    */
   async readLockfile(
     manifestDir: string,
     ctx: ProviderContext,
+    dependencies: Dependency[] = [],
   ): Promise<Map<string, string>> {
-    const found = await selectLockfile(
+    return readInstalledVersions(
+      'python',
       manifestDir,
-      [{ file: 'uv.lock' }, { file: 'poetry.lock' }],
-      (absolutePath) => ctx.readFile(absolutePath),
-      ctx.workspaceRootFor(manifestDir),
-      (_candidate, text) => {
-        const resolved = new Map<string, string>();
-        try {
-          // Both are TOML with an array of [[package]] tables.
-          const doc = parseToml(text) as {
-            package?: Array<{ name?: string; version?: string }>;
-          };
-          for (const entry of doc.package ?? []) {
-            if (entry.name && entry.version) {
-              resolved.set(normalizeName(entry.name), entry.version);
-            }
-          }
-        } catch {
-          // Fall through; an unreadable lockfile means no resolved versions.
-        }
-        return resolved.size > 0 ? resolved : undefined;
-      },
-      ctx.lockfileMemo && { store: ctx.lockfileMemo, namespace: 'resolved' },
+      ctx,
+      dependencies.map((dep) => ({
+        name: normalizeName(dep.name),
+        declared: dep.declared,
+      })),
     );
-    return found ?? new Map<string, string>();
   }
 
+  /**
+   * The tool driving this manifest.
+   *
+   * A requirements file is always pip's: `uv add` and `poetry add` write to
+   * pyproject.toml, so detecting uv beside a `requirements-dev.txt` and running
+   * `uv add` installed the package somewhere other than the file the user
+   * picked.
+   *
+   * For pyproject.toml the lockfile walk goes up to the workspace folder. A uv
+   * workspace member has no `uv.lock` of its own — the root holds it — so
+   * looking only beside the manifest read every member as a pip project.
+   */
   async detectToolchain(
     manifestPath: string,
     ctx: ProviderContext,
   ): Promise<Toolchain> {
     const cwd = path.dirname(manifestPath);
-    const preferred = ctx.preferredToolchain('python');
+    const manifestFile = path.basename(manifestPath);
+    const dirs = ancestorDirectories(cwd, ctx.workspaceRootFor(manifestPath));
 
-    const venvPath = await this.findVenv(cwd, ctx);
+    const venvPath = await this.findVenv(dirs, ctx);
     const base = {
       ecosystem: 'python' as const,
       cwd,
       venvPath,
-      manifestFile: path.basename(manifestPath),
+      manifestFile,
     };
 
-    if (preferred !== 'auto') {
-      return { ...base, id: preferred as ToolchainId };
+    if (manifestFile !== 'pyproject.toml') {
+      return { ...base, id: 'pip' };
     }
 
-    if (await ctx.exists(path.join(cwd, 'uv.lock')))
-      return { ...base, id: 'uv' };
-    if (await ctx.exists(path.join(cwd, 'poetry.lock')))
-      return { ...base, id: 'poetry' };
+    const preferred = ctx.preferredToolchain('python');
+    if (preferred === 'pip' || preferred === 'uv' || preferred === 'poetry') {
+      return { ...base, id: preferred };
+    }
 
-    // No lockfile — fall back to what pyproject.toml declares.
-    const pyproject = await ctx.readFile(path.join(cwd, 'pyproject.toml'));
-    if (pyproject) {
-      if (/\[tool\.poetry\]/.test(pyproject)) return { ...base, id: 'poetry' };
-      if (/\[tool\.uv\]/.test(pyproject)) return { ...base, id: 'uv' };
+    for (const dir of dirs) {
+      if (await ctx.exists(path.join(dir, 'uv.lock')))
+        return { ...base, id: 'uv', ...memberFlag(dir, cwd) };
+      if (await ctx.exists(path.join(dir, 'poetry.lock')))
+        return { ...base, id: 'poetry', ...memberFlag(dir, cwd) };
+    }
+
+    // No lockfile — fall back to what pyproject.toml declares, here or at a
+    // workspace root above.
+    for (const dir of dirs) {
+      const pyproject = await ctx.readFile(path.join(dir, 'pyproject.toml'));
+      if (!pyproject) continue;
+      if (/\[tool\.poetry[\].]/.test(pyproject))
+        return { ...base, id: 'poetry', ...memberFlag(dir, cwd) };
+      if (/\[tool\.uv[\].]/.test(pyproject))
+        return { ...base, id: 'uv', ...memberFlag(dir, cwd) };
     }
 
     return { ...base, id: 'pip' };
   }
 
+  /** The nearest virtualenv, beside the manifest or at a workspace root. */
   private async findVenv(
-    dir: string,
+    dirs: string[],
     ctx: ProviderContext,
   ): Promise<string | undefined> {
     // An activated environment wins over anything on disk.
     const active = process.env.VIRTUAL_ENV;
     if (active) return active;
-    for (const candidate of ['.venv', 'venv', 'env']) {
-      const full = path.join(dir, candidate);
-      if (await ctx.exists(path.join(full, 'pyvenv.cfg'))) return full;
+    for (const dir of dirs) {
+      for (const candidate of ['.venv', 'venv', 'env']) {
+        const full = path.join(dir, candidate);
+        if (await ctx.exists(path.join(full, 'pyvenv.cfg'))) return full;
+      }
     }
     return undefined;
   }
@@ -406,6 +439,11 @@ export class PythonProvider implements EcosystemProvider {
           sizeBytes: lastFile?.size,
         };
       },
+      // Names come from pyproject.toml and requirements files, and each one
+      // becomes a URL path segment; one that is not a PEP 508 name cannot
+      // resolve anyway.
+      (name) => this.isValidPackageName(name),
+      'python',
     );
   }
 
@@ -568,23 +606,68 @@ export class PythonProvider implements EcosystemProvider {
     version: string | null,
     scope: DepScope,
   ): Command | null {
+    // A fresh install has no group yet; dev and build land in the group both
+    // tools call `dev`.
+    const group: DependencyGroup | undefined =
+      scope === 'dev' || scope === 'build'
+        ? { kind: 'group', name: 'dev' }
+        : undefined;
+    return this.addCommand(toolchain, name, version, group);
+  }
+
+  updateCommand(
+    toolchain: Toolchain,
+    dep: Dependency,
+    toVersion: string,
+  ): Command | null {
+    if (!isUpdatable(dep)) return null;
+    // The group the package already lives in, so the update lands there
+    // rather than as a second copy in `dev`.
+    return this.addCommand(
+      toolchain,
+      dep.name,
+      toVersion,
+      dep.group,
+      dep.declared,
+    );
+  }
+
+  private addCommand(
+    toolchain: Toolchain,
+    name: string,
+    version: string | null,
+    group: DependencyGroup | undefined,
+    declared?: string,
+  ): Command | null {
     if (!this.isValidPackageName(name)) return null;
-    const spec = version ? `${name}==${version}` : name;
-    const isDev = scope === 'dev' || scope === 'build';
+    const operator = version ? updateOperator(declared, toolchain.id) : '==';
+    const spec = !version
+      ? name
+      : operator === '^' || operator === '~'
+        ? `${name}@${operator}${version}`
+        : `${name}${operator}${version}`;
 
     switch (toolchain.id) {
-      case 'uv':
-        return {
-          argv: ['uv', 'add', ...(isDev ? ['--dev'] : []), spec],
-          cwd: toolchain.cwd,
-          description: `Add ${spec} with uv`,
-        };
-      case 'poetry':
-        return {
-          argv: ['poetry', 'add', ...(isDev ? ['--group', 'dev'] : []), spec],
-          cwd: toolchain.cwd,
-          description: `Add ${spec} with Poetry`,
-        };
+      case 'uv': {
+        const flags = uvGroupFlags(group);
+        return (
+          flags && {
+            argv: ['uv', 'add', ...flags, spec],
+            cwd: toolchain.cwd,
+            description: `Add ${spec} with uv`,
+          }
+        );
+      }
+      case 'poetry': {
+        const flags = poetryGroupFlags(group);
+        return (
+          flags && {
+            argv: ['poetry', 'add', ...flags, spec],
+            cwd: toolchain.cwd,
+            description: `Add ${spec} with Poetry`,
+          }
+        );
+      }
       default:
         // pip installs into the environment and writes nothing back, so the
         // host pairs this with an `editManifest` call.
@@ -597,39 +680,29 @@ export class PythonProvider implements EcosystemProvider {
     }
   }
 
-  updateCommand(
-    toolchain: Toolchain,
-    dep: Dependency,
-    toVersion: string,
-  ): Command | null {
-    return this.installCommand(toolchain, dep.name, toVersion, dep.scope);
-  }
-
   uninstallCommand(toolchain: Toolchain, dep: Dependency): Command | null {
     if (!this.isValidPackageName(dep.name)) return null;
     switch (toolchain.id) {
-      case 'uv':
-        return {
-          argv: [
-            'uv',
-            'remove',
-            ...(dep.scope === 'dev' ? ['--dev'] : []),
-            dep.name,
-          ],
-          cwd: toolchain.cwd,
-          description: `Remove ${dep.name} with uv`,
-        };
-      case 'poetry':
-        return {
-          argv: [
-            'poetry',
-            'remove',
-            ...(dep.scope === 'dev' ? ['--group', 'dev'] : []),
-            dep.name,
-          ],
-          cwd: toolchain.cwd,
-          description: `Remove ${dep.name} with Poetry`,
-        };
+      case 'uv': {
+        const flags = uvGroupFlags(dep.group);
+        return (
+          flags && {
+            argv: ['uv', 'remove', ...flags, dep.name],
+            cwd: toolchain.cwd,
+            description: `Remove ${dep.name} with uv`,
+          }
+        );
+      }
+      case 'poetry': {
+        const flags = poetryGroupFlags(dep.group);
+        return (
+          flags && {
+            argv: ['poetry', 'remove', ...flags, dep.name],
+            cwd: toolchain.cwd,
+            description: `Remove ${dep.name} with Poetry`,
+          }
+        );
+      }
       default:
         return {
           argv: [
@@ -654,12 +727,14 @@ export class PythonProvider implements EcosystemProvider {
           argv: ['uv', 'lock', '--upgrade'],
           cwd: toolchain.cwd,
           description: 'Upgrade all locked versions with uv',
+          reach: 'ranges',
         };
       case 'poetry':
         return {
           argv: ['poetry', 'update'],
           cwd: toolchain.cwd,
           description: 'Update all with Poetry',
+          reach: 'ranges',
         };
       default: {
         // pip has no "update all"; the requirements file is the source of
@@ -679,6 +754,7 @@ export class PythonProvider implements EcosystemProvider {
           ],
           cwd: toolchain.cwd,
           description: `Reinstall ${requirements} with upgrades`,
+          reach: 'ranges',
         };
       }
     }
@@ -686,7 +762,17 @@ export class PythonProvider implements EcosystemProvider {
 
   /**
    * requirements.txt has no CLI that can rewrite a pin, so we edit it directly —
-   * line by line, preserving comments, ordering and unrelated flags.
+   * line by line, preserving comments, ordering, extras, environment markers,
+   * line endings and unrelated flags.
+   *
+   * Only requirements files. pyproject.toml is TOML with requirements inside
+   * string arrays; editing it as lines appended `name==1.2.3` to the end of
+   * the file and left it unparseable. Returning null there lets the host open
+   * the file for a hand edit instead.
+   *
+   * A requirement pinned with `--hash` is refused too: the new version needs
+   * new hashes, which cannot be computed here, and keeping the old ones makes
+   * `pip install --require-hashes` fail on a mismatch.
    */
   editManifest(
     manifestText: string,
@@ -694,41 +780,72 @@ export class PythonProvider implements EcosystemProvider {
       | { kind: 'add'; name: string; version: string | null; scope: DepScope }
       | { kind: 'update'; name: string; version: string; scope: DepScope }
       | { kind: 'remove'; name: string; scope: DepScope },
+    manifestFile?: string,
   ): string | null {
+    if (manifestFile !== undefined && !isRequirementsFile(manifestFile)) {
+      return null;
+    }
+
+    const eol = manifestText.includes('\r\n') ? '\r\n' : '\n';
     const lines = manifestText.split(/\r?\n/);
     const target = normalizeName(edit.name);
 
-    const indexOfDep = lines.findIndex((line) => {
-      const bare = line.split('#')[0].trim();
+    const matches = logicalLines(lines).filter((logical) => {
+      const bare = requirementPart(logical.text);
       if (bare === '' || bare.startsWith('-')) return false;
       const parsed = parseRequirement(bare);
       return parsed ? normalizeName(parsed.name) === target : false;
     });
 
     if (edit.kind === 'remove') {
-      if (indexOfDep === -1) return null;
-      lines.splice(indexOfDep, 1);
-      return lines.join('\n');
+      if (matches.length === 0) return null;
+      // Every declaration of it, including one per environment marker, and
+      // every continuation line (`--hash=…`) that belongs to each.
+      for (const match of [...matches].reverse()) {
+        lines.splice(match.start, match.end - match.start + 1);
+      }
+      return lines.join(eol);
     }
 
     const pinned = edit.version ? `${edit.name}==${edit.version}` : edit.name;
 
-    if (indexOfDep === -1) {
+    if (matches.length === 0) {
       if (edit.kind === 'update') return null;
       // Append, keeping exactly one trailing newline.
       while (lines.length > 0 && lines[lines.length - 1].trim() === '')
         lines.pop();
       lines.push(pinned, '');
-      return lines.join('\n');
+      return lines.join(eol);
     }
 
-    // Preserve any trailing comment on the line we are replacing.
-    const original = lines[indexOfDep];
-    const commentIndex = original.indexOf('#');
-    const comment =
-      commentIndex >= 0 ? `  ${original.slice(commentIndex)}` : '';
-    lines[indexOfDep] = pinned + comment;
-    return lines.join('\n');
+    // Declared more than once (one line per environment marker): which of
+    // them to move is the user's call, not ours.
+    if (matches.length > 1) return null;
+    const [match] = matches;
+    if (/(?:^|\s)--hash[=\s]/.test(match.text)) return null;
+
+    const original = lines[match.start];
+    // The comment keeps the whitespace that separated it from the requirement.
+    const commentMatch = /(?:^|\s+)#.*$/.exec(original);
+    const body = commentMatch
+      ? original.slice(0, commentMatch.index)
+      : original;
+    const comment = commentMatch?.[0] ?? '';
+
+    const parsed = parseRequirement(body.trim());
+    if (!parsed) return null;
+    // `flask>=2` moves to `flask>=3.0.0`, not to a pin nobody asked for.
+    const operator =
+      edit.kind === 'update' ? updateOperator(parsed.specifier, 'pip') : '==';
+    const leading = /^\s*/.exec(body)?.[0] ?? '';
+    const extras = /^[^[;]*?(\[[^\]]*\])/.exec(body)?.[1] ?? '';
+    // The marker, with whatever spacing preceded its `;`.
+    const marker = /\s*;.*$/.exec(body.trimEnd())?.[0] ?? '';
+    const specifier = edit.version ? `${operator}${edit.version}` : '';
+
+    lines[match.start] =
+      `${leading}${parsed.name}${extras}${specifier}${marker}${comment}`;
+    return lines.join(eol);
   }
 }
 
@@ -744,10 +861,106 @@ function pythonExe(toolchain: Toolchain): string {
     : path.join(toolchain.venvPath, 'bin', 'python');
 }
 
-/** PEP 503 name normalisation: lowercase, runs of -_. collapse to a hyphen. */
-export function normalizeName(name: string): string {
-  return name.toLowerCase().replace(/[-_.]+/g, '-');
+/**
+ * The operator an update should write, carried over from the declared
+ * constraint so an update keeps the project's style rather than pinning.
+ *
+ * Only a single-operator constraint is carried: `>=2.28` becomes `>=2.32.3`,
+ * but `>=2,<3` is pinned, because moving its lower bound past the upper one
+ * would be a constraint nothing satisfies. Poetry's own `^` and `~` survive
+ * for Poetry; for pip and uv, which speak only PEP 440, they are pinned.
+ */
+function updateOperator(
+  declared: string | undefined,
+  tool: string,
+): '==' | '>=' | '~=' | '^' | '~' {
+  const match = /^\s*(>=|~=|==|\^|~)\s*[\w.*+!-]+\s*$/.exec(declared ?? '');
+  const operator = match?.[1];
+  if (operator === '>=' || operator === '~=') return operator;
+  if ((operator === '^' || operator === '~') && tool === 'poetry') {
+    return operator;
+  }
+  return '==';
 }
+
+/** `requirements.txt`, `requirements-dev.txt`, `requirements_ci.txt`, … */
+function isRequirementsFile(fileName: string): boolean {
+  return /^requirements.*\.txt$/i.test(fileName);
+}
+
+/** Marks a toolchain found above the manifest as governing a member. */
+function memberFlag(
+  signalDir: string,
+  cwd: string,
+): { isWorkspaceMember?: true } {
+  return signalDir !== cwd ? { isWorkspaceMember: true } : {};
+}
+
+/**
+ * The group flags uv needs to find a package, or null when uv cannot express
+ * the table it lives in.
+ */
+function uvGroupFlags(group: DependencyGroup | undefined): string[] | null {
+  if (!group) return [];
+  if (!isGroupName(group.name)) return null;
+  if (group.kind === 'extra') return ['--optional', group.name];
+  return group.name === 'dev' ? ['--dev'] : ['--group', group.name];
+}
+
+/**
+ * Poetry's equivalent. Extras are left alone: Poetry 1.x takes `--optional` as
+ * a bare switch and 2.x as `--optional <extra>`, and guessing wrong edits the
+ * wrong table.
+ */
+function poetryGroupFlags(group: DependencyGroup | undefined): string[] | null {
+  if (!group) return [];
+  if (group.kind === 'extra' || !isGroupName(group.name)) return null;
+  return ['--group', group.name];
+}
+
+/** Group and extra names, as PEP 685/735 allow them — and nothing flag-like. */
+function isGroupName(name: string): boolean {
+  return /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(name);
+}
+
+/**
+ * A requirements file's physical lines joined into logical ones.
+ *
+ * pip treats a trailing backslash as a line continuation, which is how
+ * `pip-compile --generate-hashes` writes every entry: the requirement, then
+ * one `--hash=…` per line. Read line by line, the requirement kept its `\` as
+ * part of the specifier and the hash lines looked like stray flags.
+ */
+function logicalLines(
+  lines: string[],
+): Array<{ text: string; start: number; end: number }> {
+  const result: Array<{ text: string; start: number; end: number }> = [];
+  for (let start = 0; start < lines.length; start++) {
+    let end = start;
+    let text = lines[start];
+    while (/\\\s*$/.test(text) && end + 1 < lines.length) {
+      end++;
+      text = `${text.replace(/\\\s*$/, ' ')}${lines[end]}`;
+    }
+    result.push({ text: text.replace(/\\\s*$/, ''), start, end });
+    start = end;
+  }
+  return result;
+}
+
+/**
+ * The requirement itself: comment removed, and per-requirement options
+ * (`--hash`, `--config-settings`) cut off so they do not read as part of the
+ * version specifier.
+ */
+function requirementPart(line: string): string {
+  const commentIndex = line.search(/(?:^|\s)#/);
+  const bare = commentIndex >= 0 ? line.slice(0, commentIndex) : line;
+  return bare.replace(/\s+--?[A-Za-z][\s\S]*$/, '').trim();
+}
+
+/** PEP 503 name normalisation, shared with the lockfile readers. */
+export { normalizeName };
 
 /**
  * Splits a PEP 508 requirement into name and specifier, discarding extras and

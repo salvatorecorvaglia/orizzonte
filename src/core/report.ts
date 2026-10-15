@@ -62,6 +62,11 @@ function buildMarkdownReport(
   if (summary.stale) {
     lines.push('- Data is cached — registries were unreachable at scan time');
   }
+  if (summary.auditIncomplete) {
+    lines.push(
+      '- Vulnerability check incomplete — OSV.dev was not fully reachable, so the vulnerable count is a lower bound',
+    );
+  }
   lines.push('');
 
   for (const group of groups) {

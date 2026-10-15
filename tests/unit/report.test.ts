@@ -76,6 +76,17 @@ describe('buildReport (markdown)', () => {
     expect(output).toContain('- 1 vulnerable');
   });
 
+  it('notes an incomplete vulnerability check', () => {
+    const markdown = buildReport(
+      [],
+      { ...EMPTY_SUMMARY, auditIncomplete: true },
+      [],
+      { generatedAt: '2026-01-01T00:00:00.000Z' },
+      'markdown',
+    );
+    expect(markdown).toContain('Vulnerability check incomplete');
+  });
+
   it('notes stale data and includes the workspace name when given', () => {
     const output = buildReport(
       [],

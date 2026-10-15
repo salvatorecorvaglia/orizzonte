@@ -179,6 +179,12 @@ interface Props {
   filters: Filters;
   onFiltersChange: (filters: Filters) => void;
   summary: ScanSummary;
+  /**
+   * How many packages the current filters leave on screen, when that is fewer
+   * than all of them. The panel opens with "outdated" pressed, and without a
+   * count beside the total that read as dependencies having gone missing.
+   */
+  shownCount?: number;
   busy: boolean;
   busyLabel: string | undefined;
   onRefresh: () => void;
@@ -199,6 +205,7 @@ export function Toolbar({
   filters,
   onFiltersChange,
   summary,
+  shownCount,
   busy,
   busyLabel,
   onRefresh,
@@ -582,11 +589,25 @@ export function Toolbar({
         <div className="toolbar__summary" role="status">
           <span className="toolbar__kpi">
             <span className="kpi-dot kpi-dot--total" />{' '}
-            {summary.totalDependencies} packages
+            {shownCount !== undefined && shownCount < summary.totalDependencies
+              ? `${shownCount} of ${summary.totalDependencies} packages`
+              : `${summary.totalDependencies} packages`}
           </span>
           {summary.stale && (
             <span className="toolbar__kpi" title="Registries were unreachable">
               cached
+            </span>
+          )}
+          {/*
+            A vulnerable count of zero from an audit that could not finish is
+            not a clean result, and must not look like one.
+          */}
+          {summary.auditIncomplete && (
+            <span
+              className="toolbar__kpi severity--deprecated"
+              title="OSV.dev could not be fully reached, so some vulnerabilities may be missing. Check for updates again to retry."
+            >
+              <Icon name="warning" /> audit incomplete
             </span>
           )}
         </div>

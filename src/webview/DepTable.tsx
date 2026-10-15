@@ -36,13 +36,20 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { FocusEvent, KeyboardEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Dependency, Ecosystem, ProjectGroup } from '../core/types.js';
+import type {
+  Dependency,
+  Ecosystem,
+  PackageMeta,
+  ProjectGroup,
+} from '../core/types.js';
 import { compareVersions } from '../core/versions/index.js';
 import {
   currentVersion,
   declaredLabel,
   hasUpdate,
+  isUpdatable,
   scopeLabel,
+  sourceLabel,
   statusRank,
 } from '../core/vocabulary.js';
 import { formatBytes, GROUP_HEADER_HEIGHT, ROW_HEIGHT } from './format.js';
@@ -63,16 +70,13 @@ export interface SortState {
 interface Props {
   groups: ProjectGroup[];
   /**
-   * depKey -> a counter bumped each time that row's `meta` is merged in place.
-   * Passed through to `DepRow` purely to give its memo comparator a prop that
-   * actually changes value when the mutated-in-place `dep` does not.
-   *
-   * A plain object held in state, not a mutable `Map` held in a ref: a ref's
-   * identity never changes, so nothing in the render path could see it move.
-   * That worked only because a separate counter forced a re-render on every
-   * merge — an invariant nothing declared and any refactor could quietly break.
+   * Details fetched for a row after the scan (description, license, size),
+   * by dependency key. An overlay rather than a change to `groups`: rebuilding
+   * the groups would re-sort the table, and a row that gains its size while
+   * the table is sorted by Size would move out from under the pointer of the
+   * user who just opened it.
    */
-  metaVersions?: Readonly<Record<string, number>>;
+  metaByKey?: Readonly<Record<string, PackageMeta>>;
   sort: SortState;
   onSortChange: (sort: SortState) => void;
   selectedKey: string | undefined;
@@ -132,7 +136,7 @@ const COLUMNS: Array<{ key: SortKey | null; label: string; cell: string }> = [
 
 export function DepTable({
   groups,
-  metaVersions,
+  metaByKey,
   sort,
   onSortChange,
   selectedKey,
@@ -380,7 +384,10 @@ export function DepTable({
     ) : (
       <div className="empty">
         <h2>No dependencies declared</h2>
-        <p>The manifests in this workspace do not declare any dependencies.</p>
+        <p>
+          The manifests in this workspace do not declare any dependencies yet.
+          Use Add package to install the first one.
+        </p>
       </div>
     );
   }
@@ -584,7 +591,7 @@ export function DepTable({
                   ) : (
                     <DepRow
                       dep={row.dep}
-                      metaVersion={metaVersions?.[row.dep.key] ?? 0}
+                      meta={metaByKey?.[row.dep.key]}
                       index={virtualRow.index}
                       rowIndex={virtualRow.index + 2}
                       tabbable={virtualRow.index === focusedIndex}
@@ -661,6 +668,17 @@ const GroupHeader = memo(function GroupHeader({
 });
 
 function renderStatusBadge(dep: Dependency) {
+  const local = sourceLabel(dep);
+  if (local) {
+    return (
+      <span
+        className="badge badge--muted"
+        title="Not a registry package, so there is no registry version to compare against"
+      >
+        {local.toUpperCase()}
+      </span>
+    );
+  }
   if (dep.vulnerabilities.length > 0) {
     return <span className="badge badge--vuln">VULNERABLE</span>;
   }
@@ -682,8 +700,8 @@ function renderStatusBadge(dep: Dependency) {
 }
 
 const DepRow = memo(function DepRow({
-  dep,
-  metaVersion,
+  dep: scanned,
+  meta,
   index,
   rowIndex,
   tabbable,
@@ -697,8 +715,8 @@ const DepRow = memo(function DepRow({
   onFocusRow,
 }: {
   dep: Dependency;
-  /** Unused directly — its only job is to change value when `dep.meta` does. */
-  metaVersion: number;
+  /** Details fetched since the scan, which take precedence over the scan's. */
+  meta: PackageMeta | undefined;
   index: number;
   rowIndex: number;
   tabbable: boolean;
@@ -712,9 +730,7 @@ const DepRow = memo(function DepRow({
   onUninstall: (dep: Dependency) => void;
   onFocusRow: (index: number) => void;
 }) {
-  // Exists only so memo's shallow prop comparison sees a change when `dep`
-  // (mutated in place, not replaced) does not.
-  void metaVersion;
+  const dep = meta ? { ...scanned, meta } : scanned;
   const upgradeable = hasUpdate(dep);
 
   return (
@@ -869,7 +885,7 @@ const DepRow = memo(function DepRow({
       </div>
 
       <div className="cell cell--actions" role="gridcell">
-        {upgradeable && dep.latest && (
+        {upgradeable && dep.latest && isUpdatable(dep) && (
           <button
             type="button"
             className="btn-update-primary"

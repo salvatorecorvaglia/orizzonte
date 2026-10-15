@@ -155,7 +155,10 @@ export class MavenProvider implements EcosystemProvider {
         // An empty string means "inherited"; the UI renders it as such rather
         // than pretending we know the number.
         declared: declared || 'managed',
-        installed: declared || undefined,
+        // A `${...}` left over is a property this file does not define — a
+        // parent POM's, usually. It is not a version, and handing it to OSV
+        // as one asks about a release that does not exist.
+        installed: declared && !declared.includes('${') ? declared : undefined,
         updateKind: 'unknown',
         vulnerabilities: [],
         manifestPath: absolutePath,
@@ -207,10 +210,10 @@ export class MavenProvider implements EcosystemProvider {
 
   async fetchMetadata(
     name: string,
-    ctx: ProviderContext,
-    signal?: AbortSignal,
+    _ctx: ProviderContext,
+    _signal?: AbortSignal,
   ): Promise<PackageMeta | undefined> {
-    return fetchMavenMetadata(name, ctx, signal);
+    return fetchMavenMetadata(name);
   }
 
   async search(
@@ -240,6 +243,7 @@ export class MavenProvider implements EcosystemProvider {
       argv: [toolchain.wrapper ?? 'mvn', 'versions:use-latest-releases'],
       cwd: toolchain.cwd,
       description: 'Rewrite dependency versions to the latest releases',
+      reach: 'latest',
     };
   }
 
@@ -278,6 +282,10 @@ export class MavenProvider implements EcosystemProvider {
       const block = findVersionBlock(manifestText, groupId, artifactId);
       if (!block) return null;
       const body = manifestText.slice(block.start, block.end);
+      // `<version>${spring.version}</version>` defers to a property other
+      // dependencies usually share. Writing a literal over it would quietly
+      // take this one out of step with the rest, so the user edits it.
+      if (/<version>[^<]*\$\{/.test(body)) return null;
       const updated = body.replace(
         /<version>[^<]*<\/version>/,
         // `$` is meaningful in a replacement string (`$1`, `$&`), so the
@@ -295,7 +303,7 @@ export class MavenProvider implements EcosystemProvider {
     // A managed entry is not a dependency of this module, so it does not count
     // as "already present".
     if (findDeclaredBlock(manifestText, groupId, artifactId)) return null;
-    const closing = manifestText.lastIndexOf('</dependencies>');
+    const closing = projectDependenciesEnd(manifestText);
     if (closing === -1) return null;
 
     const lineStart = manifestText.lastIndexOf('\n', closing) + 1;
@@ -344,9 +352,13 @@ function findDependencyBlocks(
   artifactId: string,
 ): DependencyBlock[] {
   const managed = managedRanges(text);
+  const foreign = foreignRanges(text);
   const blocks: DependencyBlock[] = [];
 
   for (const match of text.matchAll(/<dependency>[\s\S]*?<\/dependency>/g)) {
+    // A plugin's own dependencies, a profile's, or one commented out: none
+    // is this module's dependency, whatever coordinate it names.
+    if (inRanges(match.index!, foreign)) continue;
     const body = match[0];
     const g = /<groupId>\s*([^<]*)\s*<\/groupId>/.exec(body)?.[1]?.trim();
     const a = /<artifactId>\s*([^<]*)\s*<\/artifactId>/.exec(body)?.[1]?.trim();
@@ -397,6 +409,46 @@ function findDeclaredBlock(
       (block) => !block.managed,
     ) ?? null
   );
+}
+
+/**
+ * Where the project's own `<dependencies>` element closes, or -1.
+ *
+ * Not simply the last `</dependencies>` in the file: a plugin under
+ * `<build><plugins>` has a `<dependencies>` of its own, and it usually comes
+ * after the project's — so an Add landed on the plugin's classpath.
+ */
+function projectDependenciesEnd(text: string): number {
+  const excluded = [...foreignRanges(text), ...managedRanges(text)];
+  let found = -1;
+  for (const match of text.matchAll(/<\/dependencies>/g)) {
+    if (!inRanges(match.index!, excluded)) found = match.index!;
+  }
+  return found;
+}
+
+/**
+ * Ranges whose `<dependency>` elements are not this module's direct ones:
+ * `<build>` (plugin dependencies), `<profiles>` (conditional on activation),
+ * `<reporting>`, and XML comments.
+ */
+function foreignRanges(text: string): Array<[number, number]> {
+  const patterns = [
+    /<!--[\s\S]*?-->/g,
+    /<build>[\s\S]*?<\/build>/g,
+    /<profiles>[\s\S]*?<\/profiles>/g,
+    /<reporting>[\s\S]*?<\/reporting>/g,
+  ];
+  return patterns.flatMap((pattern) =>
+    [...text.matchAll(pattern)].map((match): [number, number] => [
+      match.index!,
+      match.index! + match[0].length,
+    ]),
+  );
+}
+
+function inRanges(index: number, ranges: Array<[number, number]>): boolean {
+  return ranges.some(([from, to]) => index >= from && index < to);
 }
 
 /** Character ranges covered by `<dependencyManagement>` blocks. */

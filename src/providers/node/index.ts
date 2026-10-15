@@ -5,13 +5,16 @@
  * size and repository links inline — so this provider needs no side lookups.
  */
 
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { type ParseError, parse as parseJsonc } from 'jsonc-parser';
-import { parse as parseYaml } from 'yaml';
 import { cacheKey } from '../../core/cache.js';
-import { selectLockfile } from '../../core/lockfiles/resolve.js';
+import { readInstalledVersions } from '../../core/lockfiles/installed.js';
+import { ancestorDirectories } from '../../core/lockfiles/resolve.js';
+import { npmScopeOf, privateNpmScopes } from '../../core/privateRegistries.js';
 import type {
   Dependency,
+  DependencySource,
   DepScope,
   PackageMeta,
   ParsedManifest,
@@ -19,7 +22,11 @@ import type {
   Toolchain,
   ToolchainId,
 } from '../../core/types.js';
-import { applyDeclaredPrefix } from '../../core/versions/index.js';
+import {
+  applyDeclaredPrefix,
+  registryConstraint,
+} from '../../core/versions/index.js';
+import { isUpdatable } from '../../core/vocabulary.js';
 import {
   type Command,
   dependencyKey,
@@ -45,9 +52,52 @@ const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
  * packages since 2017: names published before then keep their capitals, and a
  * project depending on one could otherwise never be updated or removed from the
  * panel.
+ *
+ * A leading `-` is not. Names reach an argv from package.json, and one spelled
+ * like a flag (`--global`) would be read as one by the package manager — no
+ * shell is involved, so quoting cannot help.
  */
 const NAME_PATTERN =
-  /^(?:@[A-Za-z0-9-~][A-Za-z0-9-._~]*\/)?[A-Za-z0-9-~][A-Za-z0-9-._~]*$/;
+  /^(?:@[A-Za-z0-9~][A-Za-z0-9-._~]*\/)?[A-Za-z0-9~][A-Za-z0-9-._~]*$/;
+
+/**
+ * Where a package.json specifier points, and the registry name behind an alias.
+ *
+ * Only `registry` specifiers name a package the registry serves under that
+ * name. `workspace:` is a sibling in this repository, `file:`/`link:` a local
+ * directory, a git URL or `owner/repo` a checkout, and an `http(s)` URL a
+ * tarball — asking the public registry about any of them reports on a
+ * stranger's package, and "updating" one replaces the local code with it.
+ *
+ * `catalog:` (pnpm) and `patch:` (Yarn) are registry packages whose version is
+ * owned elsewhere — the workspace catalog, the patch descriptor — so they are
+ * worth looking up but not safe to rewrite from here.
+ */
+export function classifyNodeSpecifier(declared: string): {
+  source: DependencySource;
+  registryName?: string;
+} {
+  const spec = declared.trim();
+  if (spec.startsWith('workspace:')) return { source: 'workspace' };
+  if (/^(?:catalog|patch):/.test(spec)) return { source: 'inherited' };
+  if (/^(?:file|link|portal):/.test(spec) || /^(?:\.{1,2}|~)?\//.test(spec)) {
+    return { source: 'path' };
+  }
+  if (spec.startsWith('npm:')) {
+    const target = /^npm:((?:@[^@/]+\/)?[^@]+)/.exec(spec)?.[1];
+    return target
+      ? { source: 'alias', registryName: target }
+      : { source: 'registry' };
+  }
+  if (/^https?:\/\//i.test(spec)) return { source: 'url' };
+  if (
+    /^(?:git(?:\+[a-z]+)?|github|gitlab|bitbucket|gist):/i.test(spec) ||
+    /^[\w.-]+\/[\w.-]+(?:#.*)?$/.test(spec)
+  ) {
+    return { source: 'git' };
+  }
+  return { source: 'registry' };
+}
 
 interface PackageJson {
   name?: string;
@@ -89,112 +139,6 @@ function licenseFromPackument(version: PackumentVersion): string | undefined {
   return version.licenses?.[0]?.type;
 }
 
-/**
- * One pass over a v2/v3 `package-lock.json`, collecting nested installs to fall
- * back on.
- *
- * A top-level install path ("node_modules/semver") is the version the project
- * actually resolves, and wins; a nested one
- * ("node_modules/a/node_modules/semver") is a different copy and is only worth
- * reporting when there is no top-level entry at all.
- */
-function parseNpmLock(text: string): Map<string, string> {
-  const resolved = new Map<string, string>();
-  try {
-    const parsed = JSON.parse(text) as {
-      packages?: Record<string, { version?: string }>;
-      dependencies?: Record<string, { version?: string }>;
-    };
-
-    const nested = new Map<string, string>();
-    for (const [key, entry] of Object.entries(parsed.packages ?? {})) {
-      if (!key.startsWith('node_modules/') || !entry.version) continue;
-      const relative = key.slice('node_modules/'.length);
-      if (relative.includes('node_modules/')) {
-        const name = relative.replace(/.*\/node_modules\//, '');
-        if (!nested.has(name)) nested.set(name, entry.version);
-        continue;
-      }
-      resolved.set(relative, entry.version);
-    }
-    for (const [name, version] of nested) {
-      if (!resolved.has(name)) resolved.set(name, version);
-    }
-    for (const [name, entry] of Object.entries(parsed.dependencies ?? {})) {
-      if (entry.version && !resolved.has(name))
-        resolved.set(name, entry.version);
-    }
-  } catch {
-    // A malformed lockfile is not worth failing the scan over.
-  }
-  return resolved;
-}
-
-function parsePnpmLock(text: string): Map<string, string> {
-  const resolved = new Map<string, string>();
-  try {
-    const doc = (parseYaml(text) ?? {}) as {
-      importers?: Record<string, PnpmImporter>;
-      packages?: Record<string, unknown>;
-      snapshots?: Record<string, unknown>;
-    };
-
-    // Direct dependencies, keyed by the workspace they belong to.
-    for (const importer of Object.values(doc.importers ?? {})) {
-      for (const bucket of [
-        importer.dependencies,
-        importer.devDependencies,
-        importer.optionalDependencies,
-      ]) {
-        for (const [name, entry] of Object.entries(bucket ?? {})) {
-          if (entry?.version && !resolved.has(name)) {
-            resolved.set(name, stripPnpmPeerSuffix(entry.version));
-          }
-        }
-      }
-    }
-
-    // Every resolved install, keyed by `name@version` (packages:) or
-    // `name@version(peer@x)` (snapshots:) — either way, everything this
-    // lockfile actually installed.
-    for (const key of [
-      ...Object.keys(doc.packages ?? {}),
-      ...Object.keys(doc.snapshots ?? {}),
-    ]) {
-      const parsed = pnpmKeyToNameVersion(key);
-      if (parsed && !resolved.has(parsed.name)) {
-        resolved.set(parsed.name, parsed.version);
-      }
-    }
-  } catch {
-    // A malformed lockfile is not worth failing the scan over.
-  }
-  return resolved;
-}
-
-/** Yarn v1 blocks: `name@range:` then an indented `version "x.y.z"`. */
-function parseYarnLock(text: string): Map<string, string> {
-  const resolved = new Map<string, string>();
-  for (const block of text.split(/\n(?=\S)/)) {
-    const header = /^"?(@?[^@\s"]+(?:\/[^@\s"]+)?)@/.exec(block);
-    const version = /\n\s+"?version"?:?\s+"?([^"\s]+)"?/.exec(block);
-    if (header && version && !resolved.has(header[1])) {
-      resolved.set(header[1], version[1]);
-    }
-  }
-  return resolved;
-}
-
-/**
- * The lockfiles a Node project may have, in the order they are trusted when a
- * single directory holds more than one.
- */
-const NODE_LOCKFILES = [
-  { file: 'package-lock.json', parse: parseNpmLock },
-  { file: 'pnpm-lock.yaml', parse: parsePnpmLock },
-  { file: 'yarn.lock', parse: parseYarnLock },
-] as const;
-
 export class NodeProvider implements EcosystemProvider {
   readonly id = 'node' as const;
   readonly manifestFiles = ['package.json'];
@@ -215,9 +159,10 @@ export class NodeProvider implements EcosystemProvider {
   async parse(
     absolutePath: string,
     text: string,
-    _ctx: ProviderContext,
+    ctx: ProviderContext,
   ): Promise<ParsedManifest> {
     const errors: ParseError[] = [];
+    const privateScopes = await this.privateScopes(absolutePath, ctx);
     const json = (parseJsonc(text, errors, { allowTrailingComma: true }) ??
       {}) as PackageJson;
 
@@ -233,6 +178,18 @@ export class NodeProvider implements EcosystemProvider {
 
     for (const [record, scope] of buckets) {
       for (const [name, declared] of Object.entries(record ?? {})) {
+        if (typeof declared !== 'string') continue;
+        const classified = classifyNodeSpecifier(declared);
+        const { registryName } = classified;
+        // A scope an .npmrc sends to a private registry is not the public
+        // registry's to answer for — asking it discloses an internal name.
+        const npmScope = npmScopeOf(registryName ?? name);
+        const source =
+          (classified.source === 'registry' || classified.source === 'alias') &&
+          npmScope !== undefined &&
+          privateScopes.has(npmScope)
+            ? 'private'
+            : classified.source;
         dependencies.push({
           key: dependencyKey(absolutePath, scope, name),
           name,
@@ -243,6 +200,10 @@ export class NodeProvider implements EcosystemProvider {
           vulnerabilities: [],
           manifestPath: absolutePath,
           projectLabel,
+          // Only recorded when it says something: an ordinary registry
+          // dependency is the default every consumer already assumes.
+          ...(source !== 'registry' ? { source } : {}),
+          ...(registryName ? { registryName } : {}),
         });
       }
     }
@@ -262,81 +223,136 @@ export class NodeProvider implements EcosystemProvider {
   }
 
   /**
-   * Resolved versions from the nearest lockfile at or above `manifestDir`.
+   * The npm scopes this project's `.npmrc` files send to a private registry:
+   * each one from the manifest's directory up to the workspace folder, and
+   * the user's own. Read per scan through the scan memo, so a monorepo's
+   * members share one read of each file.
    *
-   * The walk is what makes this work in a workspace: members carry no lockfile
-   * of their own, so looking only in the manifest's directory found nothing for
-   * every package in every monorepo. See `core/lockfiles/resolve.ts`.
+   * None when `orizzonte.registryOverrides` names an npm registry: lookups
+   * then go to the registry the user pointed Orizzonte at, which can answer
+   * for private scopes itself.
+   */
+  private async privateScopes(
+    manifestPath: string,
+    ctx: ProviderContext,
+  ): Promise<Set<string>> {
+    if (ctx.registryOverride('node')) return new Set();
+
+    const files = [
+      ...ancestorDirectories(
+        path.dirname(manifestPath),
+        ctx.workspaceRootFor(manifestPath),
+      ).map((dir) => path.join(dir, '.npmrc')),
+      path.join(os.homedir(), '.npmrc'),
+    ];
+
+    const scopes = new Set<string>();
+    for (const file of files) {
+      const memoKey = `npmrc\u0000${file}`;
+      let found = ctx.lockfileMemo?.get(memoKey) as Set<string> | undefined;
+      if (!found) {
+        const text = await ctx.readFile(file);
+        found = text ? privateNpmScopes(text) : new Set<string>();
+        ctx.lockfileMemo?.set(memoKey, found);
+      }
+      for (const scope of found) scopes.add(scope);
+    }
+    return scopes;
+  }
+
+  /**
+   * Resolved versions from the nearest lockfile at or above `manifestDir`,
+   * as this member resolves them — see `core/lockfiles/installed.ts`.
    */
   async readLockfile(
     manifestDir: string,
     ctx: ProviderContext,
+    dependencies: Dependency[] = [],
   ): Promise<Map<string, string>> {
-    const found = await selectLockfile(
+    return readInstalledVersions(
+      'node',
       manifestDir,
-      NODE_LOCKFILES,
-      (absolutePath) => ctx.readFile(absolutePath),
-      ctx.workspaceRootFor(manifestDir),
-      // Undefined keeps the walk going, so a lockfile that parsed to nothing
-      // does not mask a usable one beside it or above it.
-      (candidate, text) => {
-        const resolved = candidate.parse(text);
-        return resolved.size > 0 ? resolved : undefined;
-      },
-      ctx.lockfileMemo && { store: ctx.lockfileMemo, namespace: 'resolved' },
+      ctx,
+      dependencies.map((dep) => ({ name: dep.name, declared: dep.declared })),
     );
-    return found ?? new Map<string, string>();
   }
 
+  /**
+   * The package manager driving this manifest.
+   *
+   * Walks up to the workspace folder rather than looking only beside the
+   * manifest. A workspace member carries neither a lockfile nor a
+   * `packageManager` field of its own — both live at the root — so looking in
+   * the member's directory alone read every pnpm, Yarn and bun monorepo as
+   * npm, and ran `npm install` inside a pnpm workspace.
+   *
+   * The nearest directory with any signal wins, and within one directory the
+   * `packageManager` field outranks a lockfile: it is the project's own
+   * declaration. Commands still run in the member's directory, where every one
+   * of these managers acts on that member.
+   */
   async detectToolchain(
     manifestPath: string,
     ctx: ProviderContext,
     knownText?: string,
   ): Promise<Toolchain> {
     const cwd = path.dirname(manifestPath);
-    // The scanner has just parsed this file; re-reading it here doubled the
-    // manifest reads of every scan for one regex against `packageManager`.
-    const manifestText = knownText ?? (await ctx.readFile(manifestPath));
-    const declared = manifestText
-      ? /"packageManager"\s*:\s*"([a-z]+)@(\d+)?/.exec(manifestText)
-      : null;
+    const dirs = ancestorDirectories(cwd, ctx.workspaceRootFor(manifestPath));
 
-    const finish = async (id: ToolchainId): Promise<Toolchain> => ({
-      id,
-      ecosystem: 'node',
-      cwd,
-      ...(id === 'yarn'
-        ? { yarnBerry: await isYarnBerry(cwd, declared?.[2], ctx) }
-        : {}),
-    });
+    let declared: { id: string; major: string | undefined } | undefined;
+    let locked: ToolchainId | undefined;
+    let signalDir = cwd;
+
+    for (const dir of dirs) {
+      // The scanner has just parsed this file; re-reading it here doubled the
+      // manifest reads of every scan for one regex against `packageManager`.
+      const text =
+        dir === dirs[0] && knownText !== undefined
+          ? knownText
+          : await ctx.readFile(path.join(dir, 'package.json'));
+      const match = text ? PACKAGE_MANAGER_PATTERN.exec(text) : null;
+      if (match && isNodeToolchain(match[1])) {
+        declared = { id: match[1], major: match[2] };
+      }
+      if (!declared) {
+        for (const [file, id] of LOCKFILE_TOOLCHAINS) {
+          if (await ctx.exists(path.join(dir, file))) {
+            locked = id;
+            break;
+          }
+        }
+      }
+      if (declared || locked) {
+        signalDir = dir;
+        break;
+      }
+    }
 
     const preferred = ctx.preferredToolchain('node');
     // Checked rather than cast. `package.json` constrains this setting to an
     // enum, but the value ends up as argv[0] of a command — "the schema says
     // so" is a property of the manifest, not of this function.
-    if (isNodeToolchain(preferred)) {
-      return finish(preferred);
-    }
+    const id: ToolchainId = isNodeToolchain(preferred)
+      ? preferred
+      : declared && isNodeToolchain(declared.id)
+        ? declared.id
+        : (locked ?? 'npm');
 
-    // `packageManager` is the project's own declaration and outranks lockfiles.
-    if (declared && isNodeToolchain(declared[1])) {
-      return finish(declared[1]);
-    }
-
-    const checks: Array<[string, ToolchainId]> = [
-      ['bun.lock', 'bun'],
-      ['bun.lockb', 'bun'],
-      ['pnpm-lock.yaml', 'pnpm'],
-      ['yarn.lock', 'yarn'],
-      ['package-lock.json', 'npm'],
-    ];
-    for (const [file, id] of checks) {
-      if (await ctx.exists(path.join(cwd, file))) {
-        return finish(id);
-      }
-    }
-
-    return finish('npm');
+    return {
+      id,
+      ecosystem: 'node',
+      cwd,
+      ...(signalDir !== cwd ? { isWorkspaceMember: true } : {}),
+      ...(id === 'yarn'
+        ? {
+            yarnBerry: await isYarnBerry(
+              dirs,
+              declared?.id === 'yarn' ? declared.major : undefined,
+              ctx,
+            ),
+          }
+        : {}),
+    };
   }
 
   async fetchVersions(
@@ -383,6 +399,7 @@ export class NodeProvider implements EcosystemProvider {
       // falls back to stale data rather than rejecting the whole batch and
       // losing results already fetched for sibling packages.
       (name) => this.isValidPackageName(name),
+      'node',
     );
   }
 
@@ -493,10 +510,31 @@ export class NodeProvider implements EcosystemProvider {
     dep: Dependency,
     toVersion: string,
   ): Command | null {
+    // A workspace sibling, a path, a git checkout or a catalog entry has no
+    // registry version this manifest could move to: `pnpm add foo@^2` would
+    // replace the local code with whatever the public registry calls `foo`.
+    if (!isUpdatable(dep)) return null;
+
     // `toVersion` is a bare version from the registry. Re-applying the range
     // operator the manifest already uses (`^`, `~`) keeps the project's
     // constraint style instead of silently pinning an exact version.
-    const version = applyDeclaredPrefix(dep.declared, toVersion);
+    const version = applyDeclaredPrefix(
+      registryConstraint(dep.declared),
+      toVersion,
+    );
+
+    // An alias keeps its alias: `strip-ansi-cjs@npm:strip-ansi@^6.0.1`.
+    if (dep.source === 'alias') {
+      if (!dep.registryName || !this.isValidPackageName(dep.registryName)) {
+        return null;
+      }
+      return this.installCommand(
+        toolchain,
+        dep.name,
+        `npm:${dep.registryName}@${version}`,
+        dep.scope,
+      );
+    }
     return this.installCommand(toolchain, dep.name, version, dep.scope);
   }
 
@@ -515,17 +553,22 @@ export class NodeProvider implements EcosystemProvider {
     // which is the behaviour people expect from an "update all" button.
     //
     // The verb is not shared: npm, pnpm and bun spell it `update`, Yarn 1
-    // spells it `upgrade`, and Yarn 2+ spells it `up`. `yarn update` has never
-    // existed in either line.
+    // spells it `upgrade`. Yarn 2+ has no equivalent verb: its `up` needs a
+    // package pattern and moves each match to its *latest* release, rewriting
+    // the manifest. `up -R` with a match-all pattern is the within-ranges form
+    // — it re-resolves every range and touches only the lockfile.
     const argv =
       toolchain.id === 'yarn'
-        ? ['yarn', toolchain.yarnBerry ? 'up' : 'upgrade']
+        ? toolchain.yarnBerry
+          ? ['yarn', 'up', '-R', '*']
+          : ['yarn', 'upgrade']
         : [toolchain.id, 'update'];
 
     return {
       argv,
       cwd: toolchain.cwd,
       description: 'Update all dependencies within their declared ranges',
+      reach: 'ranges',
     };
   }
 }
@@ -553,23 +596,39 @@ function scopeFlags(toolchain: Toolchain, scope: DepScope): string[] {
   }
 }
 
+/** `"packageManager": "pnpm@9.1.0"` — the manager and its major. */
+const PACKAGE_MANAGER_PATTERN = /"packageManager"\s*:\s*"([a-z]+)@(\d+)?/;
+
+/** Lockfiles that identify a manager, checked in this order per directory. */
+const LOCKFILE_TOOLCHAINS: ReadonlyArray<[string, ToolchainId]> = [
+  ['bun.lock', 'bun'],
+  ['bun.lockb', 'bun'],
+  ['pnpm-lock.yaml', 'pnpm'],
+  ['yarn.lock', 'yarn'],
+  ['package-lock.json', 'npm'],
+];
+
 /**
  * Distinguishes Yarn 2+ from Yarn 1.
  *
  * Three signals, cheapest first: the major in `packageManager`, the presence of
  * `.yarnrc.yml` (Berry-only — v1 used `.yarnrc`), and the `__metadata` block
- * Berry writes at the top of every lockfile it owns.
+ * Berry writes at the top of every lockfile it owns. The files are looked for
+ * in the same directories toolchain detection walked, since in a workspace
+ * they sit at the root rather than beside the member.
  */
 async function isYarnBerry(
-  cwd: string,
+  dirs: string[],
   declaredMajor: string | undefined,
   ctx: ProviderContext,
 ): Promise<boolean> {
   if (declaredMajor) return Number(declaredMajor) >= 2;
-  if (await ctx.exists(path.join(cwd, '.yarnrc.yml'))) return true;
-
-  const lock = await ctx.readFile(path.join(cwd, 'yarn.lock'));
-  return lock ? /^__metadata:/m.test(lock) : false;
+  for (const dir of dirs) {
+    if (await ctx.exists(path.join(dir, '.yarnrc.yml'))) return true;
+    const lock = await ctx.readFile(path.join(dir, 'yarn.lock'));
+    if (lock !== null) return /^__metadata:/m.test(lock);
+  }
+  return false;
 }
 
 /** The four managers this provider knows how to drive. */
@@ -584,38 +643,4 @@ function isNodeToolchain(
 /** Encode scoped package names for npm registry API while preserving the leading '@'. */
 function encodeName(name: string): string {
   return encodeURIComponent(name).replace(/^%40/, '@');
-}
-
-/** One `importers.<path>.dependencies` bucket in pnpm-lock.yaml. */
-interface PnpmImporter {
-  dependencies?: Record<string, { version?: string }>;
-  devDependencies?: Record<string, { version?: string }>;
-  optionalDependencies?: Record<string, { version?: string }>;
-}
-
-/** Drops the `(peer@x)` suffix pnpm appends to a resolved version. */
-function stripPnpmPeerSuffix(version: string): string {
-  const paren = version.indexOf('(');
-  return paren >= 0 ? version.slice(0, paren) : version;
-}
-
-/**
- * Splits a `packages:`/`snapshots:` key into a name and version.
- *
- * Keys look like `/react@18.2.0:` (older lockfiles), `react@18.2.0:`, or
- * `react@18.2.0(react-dom@18.2.0):` (peer-dependency suffix) — scoped names
- * carry their own `@`, so only the last one separates name from version.
- */
-function pnpmKeyToNameVersion(
-  key: string,
-): { name: string; version: string } | undefined {
-  let rest = key.startsWith('/') ? key.slice(1) : key;
-  const paren = rest.indexOf('(');
-  if (paren >= 0) rest = rest.slice(0, paren);
-
-  const at = rest.lastIndexOf('@');
-  if (at <= 0) return undefined;
-  const name = rest.slice(0, at);
-  const version = rest.slice(at + 1);
-  return name && version ? { name, version } : undefined;
 }

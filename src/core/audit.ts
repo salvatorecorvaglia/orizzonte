@@ -10,8 +10,20 @@
 import type { ProviderContext } from '../providers/provider.js';
 import { providerFor } from '../providers/registry.js';
 import { cacheKey, TTL } from './cache.js';
-import type { ProjectGroup, Severity, Vulnerability } from './types.js';
-import { sortBySeverity } from './vocabulary.js';
+import { normalizeName as normalizePythonName } from './pep503.js';
+import type {
+  Dependency,
+  Ecosystem,
+  ProjectGroup,
+  Severity,
+  Vulnerability,
+} from './types.js';
+import { compareVersions } from './versions/index.js';
+import {
+  isRegistryPackage,
+  registryNameOf,
+  sortBySeverity,
+} from './vocabulary.js';
 
 const OSV_API = 'https://api.osv.dev';
 const MAX_BATCH = 500;
@@ -43,13 +55,45 @@ interface OsvVuln {
   aliases?: string[];
   severity?: Array<{ type: string; score: string }>;
   database_specific?: { severity?: string };
-  affected?: Array<{
-    package?: { name?: string; ecosystem?: string };
-    ranges?: Array<{
-      type: string;
-      events: Array<{ introduced?: string; fixed?: string }>;
+  affected?: OsvAffected[];
+}
+
+interface OsvAffected {
+  package?: { name?: string; ecosystem?: string };
+  ranges?: Array<{
+    type: string;
+    events: Array<{
+      introduced?: string;
+      fixed?: string;
+      last_affected?: string;
     }>;
   }>;
+}
+
+/**
+ * What is cached per advisory: the advisory as the UI shows it, minus the fix
+ * version, plus the affected ranges that fix version is computed from.
+ *
+ * The fix version cannot be cached on the advisory itself. One advisory can
+ * cover several packages and several release lines — "fixed in 1.2.3 for 1.x,
+ * 2.0.1 for 2.x" — so the right answer depends on which package, at which
+ * version, is asking. Taking the first `fixed` event anywhere in the record
+ * told a 2.x user to "upgrade" to 1.2.3.
+ */
+interface AdvisoryRecord {
+  vulnerability: Omit<Vulnerability, 'fixedVersion'>;
+  affected: OsvAffected[];
+}
+
+/** What an audit managed to establish. */
+export interface AuditOutcome {
+  /**
+   * False when some of OSV could not be reached, so the advisories found are
+   * a lower bound. The UI says so: a failed audit and a clean one used to look
+   * identical — zero vulnerable — which is the one thing a security check must
+   * not do.
+   */
+  complete: boolean;
 }
 
 /**
@@ -62,7 +106,7 @@ export async function auditDependencies(
   groups: ProjectGroup[],
   ctx: ProviderContext,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<AuditOutcome> {
   // Build the query set, remembering which dependencies each query maps back to.
   interface Query {
     package: { name: string; ecosystem: string };
@@ -81,8 +125,12 @@ export async function auditDependencies(
       // OSV matches on a concrete version; a range tells it nothing.
       const version = dep.installed;
       if (!version) return;
+      // A workspace sibling or local path is not the registry package of the
+      // same name, and its name may well be private.
+      if (!isRegistryPackage(dep)) return;
+      const name = registryNameOf(dep);
 
-      const identity = `${osvEcosystem}|${dep.name}|${version}`;
+      const identity = `${osvEcosystem}|${name}|${version}`;
       const existing = seen.get(identity);
       if (existing !== undefined) {
         owners[existing].push({ group, index });
@@ -91,14 +139,14 @@ export async function auditDependencies(
 
       seen.set(identity, queries.length);
       queries.push({
-        package: { name: dep.name, ecosystem: osvEcosystem },
+        package: { name, ecosystem: osvEcosystem },
         version,
       });
       owners.push([{ group, index }]);
     });
   }
 
-  if (queries.length === 0) return;
+  if (queries.length === 0) return { complete: true };
 
   // Batch, then fetch details only for the IDs that came back.
   const idsPerQuery: Array<string[]> = new Array(queries.length)
@@ -118,6 +166,7 @@ export async function auditDependencies(
     queries.map((_query, index) => [index, undefined]),
   );
 
+  let batchFailed = false;
   for (let page = 0; page < MAX_PAGES && pageTokens.size > 0; page++) {
     const pending = [...pageTokens.entries()];
     const nextTokens = new Map<number, string | undefined>();
@@ -160,6 +209,7 @@ export async function auditDependencies(
          * from "nothing is vulnerable".
          */
         failed = true;
+        batchFailed = true;
         break;
       }
     }
@@ -167,36 +217,117 @@ export async function auditDependencies(
     if (failed) break;
     pageTokens = nextTokens;
   }
+  let complete = !batchFailed;
 
   const uniqueIds = [...new Set(idsPerQuery.flat())];
-  if (uniqueIds.length === 0) return;
+  if (uniqueIds.length === 0) return { complete };
 
   const details = await fetchVulnerabilities(uniqueIds, ctx, signal);
+  if (details.size < uniqueIds.length) complete = false;
 
   idsPerQuery.forEach((ids, queryIndex) => {
     if (ids.length === 0) return;
-    // Sorted at the source, so the drawer, the tree tooltip and anything added
-    // later all present the worst advisory first without each deciding for
-    // itself.
-    const resolved = sortBySeverity(
-      [...new Set(ids)]
-        .map((id) => details.get(id))
-        .filter((vuln): vuln is Vulnerability => vuln !== undefined),
-    );
-    if (resolved.length === 0) return;
+    const records = [...new Set(ids)]
+      .map((id) => details.get(id))
+      .filter((record): record is AdvisoryRecord => record !== undefined);
+    if (records.length === 0) return;
 
     for (const owner of owners[queryIndex]) {
-      owner.group.dependencies[owner.index].vulnerabilities = resolved;
+      const dep = owner.group.dependencies[owner.index];
+      // Sorted at the source, so the drawer, the tree tooltip and anything
+      // added later all present the worst advisory first without each
+      // deciding for itself.
+      dep.vulnerabilities = sortBySeverity(
+        records.map((record) => ({
+          ...record.vulnerability,
+          fixedVersion: fixedVersionFor(
+            record.affected,
+            dep,
+            osvEcosystemOf(dep),
+          ),
+        })),
+      );
     }
   });
+
+  return { complete };
+}
+
+function osvEcosystemOf(dep: Dependency): string | undefined {
+  return providerFor(dep.ecosystem).osvEcosystem;
+}
+
+/**
+ * The first version that fixes the advisory for *this* dependency.
+ *
+ * Only the affected entries naming this package count (an advisory can list
+ * several), and within them the range the installed version actually falls
+ * in: its `fixed` event is the upgrade that resolves it. When no range
+ * contains the installed version — a guessed or unusual version string — the
+ * lowest fix above it is the next best answer, and nothing at all beats
+ * pointing at a version that is older than what is installed.
+ */
+export function fixedVersionFor(
+  affected: OsvAffected[],
+  dep: Pick<Dependency, 'name' | 'registryName' | 'installed' | 'ecosystem'>,
+  osvEcosystem: string | undefined,
+): string | undefined {
+  const name = osvName(registryNameOf(dep), dep.ecosystem);
+  const named = affected.filter((entry) => {
+    const pkg = entry.package;
+    if (!pkg?.name) return true;
+    if (osvEcosystem && pkg.ecosystem && pkg.ecosystem !== osvEcosystem) {
+      return false;
+    }
+    return osvName(pkg.name, dep.ecosystem) === name;
+  });
+
+  const installed = dep.installed;
+  const compare = (a: string, b: string) =>
+    compareVersions(dep.ecosystem, a, b);
+  const fixes: string[] = [];
+
+  for (const entry of named) {
+    for (const range of entry.ranges ?? []) {
+      // Git ranges are commit hashes, not versions.
+      if (range.type === 'GIT') continue;
+      let introduced: string | undefined;
+      for (const event of range.events) {
+        if (event.introduced !== undefined) introduced = event.introduced;
+        if (event.fixed === undefined) continue;
+        fixes.push(event.fixed);
+        if (
+          installed !== undefined &&
+          (introduced === undefined ||
+            introduced === '0' ||
+            compare(installed, introduced) >= 0) &&
+          compare(installed, event.fixed) < 0
+        ) {
+          return event.fixed;
+        }
+      }
+    }
+  }
+
+  if (installed === undefined) {
+    return fixes.sort(compare)[0];
+  }
+  return fixes
+    .filter((fixed) => compare(fixed, installed) > 0)
+    .sort(compare)[0];
+}
+
+/** Package names as OSV compares them: PyPI's are PEP 503-normalised. */
+function osvName(name: string, ecosystem: Ecosystem): string {
+  return ecosystem === 'python' ? normalizePythonName(name) : name;
 }
 
 async function fetchVulnerabilities(
   ids: string[],
   ctx: ProviderContext,
   signal?: AbortSignal,
-): Promise<Map<string, Vulnerability>> {
-  const result = new Map<string, Vulnerability>();
+): Promise<Map<string, AdvisoryRecord>> {
+  const result = new Map<string, AdvisoryRecord>();
 
   // Bounded concurrency: advisory records are small but there can be many.
   const CONCURRENCY = 8;
@@ -206,9 +337,12 @@ async function fetchVulnerabilities(
     Array.from({ length: Math.min(CONCURRENCY, ids.length) }, async () => {
       while (cursor < ids.length) {
         const id = ids[cursor++];
-        const key = cacheKey('osv', 'vuln', id);
+        // `record`, not the `vuln` key earlier versions cached a
+        // precomputed fix version under: those entries cannot answer the
+        // per-package question and must not be read back as if they could.
+        const key = cacheKey('osv', 'record', id);
 
-        const cached = ctx.cache.get<Vulnerability>(key);
+        const cached = ctx.cache.get<AdvisoryRecord>(key);
         if (cached) {
           result.set(id, cached);
           continue;
@@ -216,12 +350,12 @@ async function fetchVulnerabilities(
 
         try {
           const raw = await ctx.http.getJson<OsvVuln>(
-            `${OSV_API}/v1/vulns/${id}`,
+            `${OSV_API}/v1/vulns/${encodeURIComponent(id)}`,
             { signal },
           );
-          const vuln = toVulnerability(raw);
-          result.set(id, vuln);
-          await ctx.cache.set(key, vuln, TTL.audit);
+          const record = toRecord(raw);
+          result.set(id, record);
+          await ctx.cache.set(key, record, TTL.audit);
         } catch {
           // A single missing advisory should not abort the audit.
         }
@@ -232,29 +366,26 @@ async function fetchVulnerabilities(
   return result;
 }
 
-function toVulnerability(raw: OsvVuln): Vulnerability {
+function toRecord(raw: OsvVuln): AdvisoryRecord {
   const { severity, reported } = deriveSeverity(raw);
-  // Prefer the first fixed version any range reports — that is what the user
-  // needs to upgrade to.
-  let fixedVersion: string | undefined;
-  for (const affected of raw.affected ?? []) {
-    for (const range of affected.ranges ?? []) {
-      for (const event of range.events) {
-        if (event.fixed) {
-          fixedVersion ??= event.fixed;
-        }
-      }
-    }
-  }
-
   return {
-    id: raw.id,
-    summary: raw.summary ?? raw.details?.slice(0, 200) ?? 'No summary provided',
-    severity,
-    aliases: raw.aliases ?? [],
-    fixedVersion,
-    ...(reported ? {} : { severityUnknown: true }),
-    url: `https://osv.dev/vulnerability/${raw.id}`,
+    vulnerability: {
+      id: raw.id,
+      summary:
+        raw.summary ?? raw.details?.slice(0, 200) ?? 'No summary provided',
+      severity,
+      aliases: raw.aliases ?? [],
+      ...(reported ? {} : { severityUnknown: true }),
+      url: `https://osv.dev/vulnerability/${encodeURIComponent(raw.id)}`,
+    },
+    // Only what `fixedVersionFor` reads, so the cached entry stays small.
+    affected: (raw.affected ?? []).map((entry) => ({
+      package: entry.package,
+      ranges: entry.ranges?.map((range) => ({
+        type: range.type,
+        events: range.events,
+      })),
+    })),
   };
 }
 
@@ -280,15 +411,17 @@ function deriveSeverity(raw: OsvVuln): {
   }
   if (label === 'medium') return { severity: 'moderate', reported: true };
 
-  const cvss = raw.severity?.find((entry) => entry.type.startsWith('CVSS'));
-  if (cvss) {
-    const score = parseCvssBaseScore(cvss.score);
-    if (score !== undefined) {
-      if (score >= 9) return { severity: 'critical', reported: true };
-      if (score >= 7) return { severity: 'high', reported: true };
-      if (score >= 4) return { severity: 'moderate', reported: true };
-      return { severity: 'low', reported: true };
-    }
+  // Every CVSS entry, not just the first: an advisory listing a v4 vector
+  // (which cannot be scored here) ahead of a v3 one was reported as unknown
+  // while the answer sat right beside it.
+  for (const entry of raw.severity ?? []) {
+    if (!entry.type.startsWith('CVSS')) continue;
+    const score = parseCvssBaseScore(entry.score);
+    if (score === undefined) continue;
+    if (score >= 9) return { severity: 'critical', reported: true };
+    if (score >= 7) return { severity: 'high', reported: true };
+    if (score >= 4) return { severity: 'moderate', reported: true };
+    return { severity: 'low', reported: true };
   }
 
   /*
@@ -318,6 +451,8 @@ function deriveSeverity(raw: OsvVuln): {
  * `deriveSeverity` marks the result as unreported rather than inventing one.
  */
 export function parseCvssBaseScore(score: string): number | undefined {
+  // `Number('')` is 0, which read an empty score as a confident "low".
+  if (score.trim() === '') return undefined;
   const numeric = Number(score);
   if (Number.isFinite(numeric)) return numeric;
 
@@ -365,6 +500,18 @@ export function parseCvssBaseScore(score: string): number | undefined {
     ? Math.min(1.08 * (impact + exploitability), 10)
     : Math.min(impact + exploitability, 10);
 
-  // CVSS rounds up to one decimal place.
-  return Math.ceil(raw * 10) / 10;
+  return roundUp(raw);
+}
+
+/**
+ * The specification's `Roundup`: the smallest one-decimal number not below
+ * the input, computed in integers. `Math.ceil(x * 10) / 10` is the same idea,
+ * but floating-point error turns an exact 4.0 into 4.000000000000001 and then
+ * into 4.1 — which is what the spec's integer form exists to prevent.
+ */
+function roundUp(value: number): number {
+  const scaled = Math.round(value * 100_000);
+  return scaled % 10_000 === 0
+    ? scaled / 100_000
+    : (Math.floor(scaled / 10_000) + 1) / 10;
 }

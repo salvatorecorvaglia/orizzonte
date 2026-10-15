@@ -11,6 +11,10 @@
 
 import * as path from 'node:path';
 import { cacheKey, TTL } from '../../core/cache.js';
+import {
+  goPrivatePatterns,
+  matchesGoPrivate,
+} from '../../core/privateRegistries.js';
 import type {
   Dependency,
   DepScope,
@@ -19,6 +23,7 @@ import type {
   SearchResult,
   Toolchain,
 } from '../../core/types.js';
+import { isUpdatable, registryNameOf } from '../../core/vocabulary.js';
 import {
   type Command,
   dependencyKey,
@@ -99,6 +104,20 @@ export class GoProvider implements EcosystemProvider {
       });
     }
 
+    applyReplacements(dependencies, parseReplacements(text));
+
+    // GOPRIVATE and GONOPROXY name modules that must not reach the public
+    // proxy — asking it, or OSV, about one discloses an internal path.
+    const privatePatterns = goPrivatePatterns(process.env);
+    if (privatePatterns.length > 0) {
+      for (const dep of dependencies) {
+        if (dep.source === 'path') continue;
+        if (matchesGoPrivate(registryNameOf(dep), privatePatterns)) {
+          dep.source = 'private';
+        }
+      }
+    }
+
     return {
       ecosystem: 'golang',
       path: absolutePath,
@@ -161,6 +180,7 @@ export class GoProvider implements EcosystemProvider {
       // that is not a real module path cannot resolve, and should not be
       // pasted into a URL to find that out.
       (name) => this.isValidPackageName(name),
+      'golang',
     );
   }
 
@@ -244,6 +264,9 @@ export class GoProvider implements EcosystemProvider {
     dep: Dependency,
     toVersion: string,
   ): Command | null {
+    // A replaced module's version is the `replace` directive's, which
+    // `go get` on the original path would not change.
+    if (!isUpdatable(dep)) return null;
     return this.installCommand(toolchain, dep.name, toVersion, dep.scope);
   }
 
@@ -262,7 +285,76 @@ export class GoProvider implements EcosystemProvider {
       argv: ['go', 'get', '-u', './...'],
       cwd: toolchain.cwd,
       description: 'Update all modules to their latest minor/patch releases',
+      reach: 'ranges',
     };
+  }
+}
+
+interface Replacement {
+  from: string;
+  /** Only this version of `from` is replaced, when the directive names one. */
+  fromVersion?: string;
+  to: string;
+  /** Absent for a local directory replacement. */
+  toVersion?: string;
+}
+
+/**
+ * `replace` directives, in their single-line and block forms.
+ *
+ * The build uses the replacement, not what `require` names, so a scan that
+ * ignored them audited and compared a version the project does not compile.
+ */
+export function parseReplacements(text: string): Replacement[] {
+  const blocks = [...text.matchAll(/^replace\s*\(([\s\S]*?)^\)/gm)].flatMap(
+    (match) => match[1].split(/\r?\n/),
+  );
+  const singles = [...text.matchAll(/^replace\s+([^(\s].*)$/gm)].map(
+    (match) => match[1],
+  );
+
+  const replacements: Replacement[] = [];
+  for (const raw of [...blocks, ...singles]) {
+    const line = raw.replace(/\/\/.*$/, '').trim();
+    const match = /^(\S+)(?:\s+(v\S+))?\s*=>\s*(\S+)(?:\s+(v\S+))?$/.exec(line);
+    if (!match) continue;
+    replacements.push({
+      from: match[1],
+      fromVersion: match[2],
+      to: match[3],
+      toVersion: match[4],
+    });
+  }
+  return replacements;
+}
+
+/**
+ * Points each replaced requirement at what the build really uses: a local
+ * directory (no registry version at all), or another module at a pinned
+ * version — looked up and audited as that module, and not rewritten from
+ * here, since the `replace` directive owns the version.
+ */
+function applyReplacements(
+  dependencies: Dependency[],
+  replacements: Replacement[],
+): void {
+  for (const dep of dependencies) {
+    const replacement = replacements.find(
+      (candidate) =>
+        candidate.from === dep.name &&
+        (candidate.fromVersion === undefined ||
+          candidate.fromVersion === dep.declared),
+    );
+    if (!replacement) continue;
+
+    if (replacement.toVersion === undefined) {
+      dep.source = 'path';
+      dep.installed = undefined;
+      continue;
+    }
+    dep.source = 'inherited';
+    dep.installed = replacement.toVersion;
+    if (replacement.to !== dep.name) dep.registryName = replacement.to;
   }
 }
 

@@ -6,9 +6,15 @@
  * awaited, so opening a project never blocks on the network.
  */
 
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { TtlCache } from './core/cache.js';
-import { findDuplicateVersions } from './core/depGraph.js';
+import {
+  findDuplicateVersions,
+  lockfilePathFor,
+  mergeSharedLockfiles,
+} from './core/depGraph.js';
+import { describeError, isAbortError } from './core/errors.js';
 import { HttpClient } from './core/http.js';
 import { buildReport, type ReportFormat } from './core/report.js';
 import { Scanner, type ScanResult } from './core/scanner.js';
@@ -22,7 +28,6 @@ import { manifestGlob } from './providers/registry.js';
 import { DepCodeLensProvider } from './ui/depCodeLens.js';
 import { DepDiagnostics } from './ui/depDiagnostics.js';
 import { PanelManager } from './ui/panelManager.js';
-import { SidebarViewProvider } from './ui/sidebarProvider.js';
 
 /**
  * The object `activate` returns.
@@ -172,9 +177,9 @@ export function activate(context: vscode.ExtensionContext): OrizzonteApi {
       }
       return result;
     } catch (error) {
-      if (!isAbort(error)) {
+      if (!isAbortError(error)) {
         void vscode.window.showErrorMessage(
-          `Orizzonte scan failed: ${describe(error)}`,
+          `Orizzonte scan failed: ${describeError(error)}`,
         );
       }
       return undefined;
@@ -187,16 +192,20 @@ export function activate(context: vscode.ExtensionContext): OrizzonteApi {
     void runScan(networkAllowed());
   });
 
-  const sidebarProvider = new SidebarViewProvider(
-    context.extensionUri,
-    version,
-  );
-
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      SidebarViewProvider.viewType,
-      sidebarProvider,
-    ),
+    /*
+     * The Activity Bar view is a launcher, and its content is the welcome text
+     * `package.json` contributes under `viewsWelcome`: buttons and links VS
+     * Code renders and themes itself. An empty tree is what makes it show.
+     *
+     * It used to be a hand-written webview — its own HTML, CSP, script, a
+     * restated copy of the theme tokens and a codicon font copied into `dist`
+     * for it — to draw two buttons and three links.
+     */
+    vscode.window.registerTreeDataProvider<never>('orizzonte.sidebar', {
+      getChildren: () => [],
+      getTreeItem: (element) => element,
+    }),
     statusBar,
     panel,
     watcher,
@@ -206,13 +215,6 @@ export function activate(context: vscode.ExtensionContext): OrizzonteApi {
       { pattern: manifestGlob() },
       codeLensProvider,
     ),
-
-    // Opening a manifest that was not among the documents already open when
-    // the last scan landed is the one case `diagnostics.refresh` would
-    // otherwise miss, since it only walks `workspace.textDocuments`.
-    vscode.workspace.onDidOpenTextDocument(() => {
-      diagnostics.refresh(panel.currentResult);
-    }),
 
     // CodeLens-only: hidden from the command palette (see menus.commandPalette
     // in package.json), since it exists purely to give a lens something to
@@ -327,6 +329,18 @@ export function activate(context: vscode.ExtensionContext): OrizzonteApi {
         return;
       }
       panel.revealDependency(dep.key, 'why');
+    }),
+
+    // Adding or removing a folder changes which manifests exist, and no file
+    // event says so: the files were there all along, just outside the view.
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      void runScan(networkAllowed());
+    }),
+
+    // Trust unlocks `orizzonte.registryOverrides`, so the registries behind
+    // every version shown may just have changed.
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      void runScan(networkAllowed());
     }),
 
     // Rebuilding the User-Agent keeps the contact address in sync with settings.
@@ -454,24 +468,45 @@ async function pickReportFormat(): Promise<ReportFormat | undefined> {
  * reports `checked: false` rather than failing the whole export. */
 async function collectDuplicateVersions(
   groups: ScanResult['groups'],
-  ctx: ProviderContext,
+  providerCtx: ProviderContext,
 ): Promise<ProjectDuplicateVersions[]> {
-  return Promise.all(
-    groups.map(async (group) => ({
-      manifestPath: group.manifestPath,
-      projectLabel: group.label,
-      ecosystem: group.ecosystem,
-      ...(await findDuplicateVersions(
+  // One memo for the sweep, so a workspace's shared lockfile is parsed once.
+  const ctx = { ...providerCtx, lockfileMemo: new Map<string, unknown>() };
+  const lockfiles = new Map<string, string | undefined>();
+  const results = await Promise.all(
+    groups.map(async (group) => {
+      const dir = path.dirname(group.manifestPath);
+      lockfiles.set(
         group.manifestPath,
-        group.ecosystem,
-        ctx,
-      )),
-    })),
+        await lockfilePathFor(
+          dir,
+          group.ecosystem,
+          (absolutePath) => ctx.readFile(absolutePath),
+          ctx.workspaceRootFor(dir),
+          { store: ctx.lockfileMemo, namespace: 'lockfile-path' },
+        ),
+      );
+      return {
+        manifestPath: group.manifestPath,
+        projectLabel: group.label,
+        ecosystem: group.ecosystem,
+        ...(await findDuplicateVersions(
+          group.manifestPath,
+          group.ecosystem,
+          ctx,
+        )),
+      };
+    }),
+  );
+  // One section per lockfile, not one per workspace member reading it.
+  return mergeSharedLockfiles(results, (result) =>
+    lockfiles.get(result.manifestPath),
   );
 }
 
 function updateStatusBar(item: vscode.StatusBarItem, result: ScanResult): void {
-  const { totalDependencies, outdated, vulnerable } = result.summary;
+  const { totalDependencies, outdated, vulnerable, auditIncomplete } =
+    result.summary;
 
   if (totalDependencies === 0) {
     item.hide();
@@ -480,20 +515,25 @@ function updateStatusBar(item: vscode.StatusBarItem, result: ScanResult): void {
 
   const parts: string[] = [];
   if (vulnerable > 0) parts.push(`$(shield) ${vulnerable}`);
+  // A count from an audit that could not finish is a lower bound.
+  if (auditIncomplete) parts.push('$(warning)');
   if (outdated > 0) parts.push(`$(arrow-up) ${outdated}`);
 
   item.text =
     parts.length > 0
       ? `$(package) ${parts.join(' ')}`
       : `$(package) ${totalDependencies}`;
-  item.tooltip = `Orizzonte — ${totalDependencies} dependencies, ${outdated} outdated, ${vulnerable} vulnerable`;
+  const auditNote = auditIncomplete
+    ? ' (vulnerability check incomplete — OSV.dev was not fully reachable)'
+    : '';
+  item.tooltip = `Orizzonte — ${totalDependencies} dependencies, ${outdated} outdated, ${vulnerable} vulnerable${auditNote}`;
   /*
    * `text` is icons and bare numbers ("$(shield) 1 $(arrow-up) 6"), which a
    * screen reader reads as two unexplained digits. The label spells out what
    * they count.
    */
   item.accessibilityInformation = {
-    label: `Orizzonte: ${totalDependencies} dependencies, ${outdated} outdated, ${vulnerable} vulnerable`,
+    label: `Orizzonte: ${totalDependencies} dependencies, ${outdated} outdated, ${vulnerable} vulnerable${auditNote}`,
     role: 'button',
   };
   item.backgroundColor =
@@ -501,12 +541,4 @@ function updateStatusBar(item: vscode.StatusBarItem, result: ScanResult): void {
       ? new vscode.ThemeColor('statusBarItem.warningBackground')
       : undefined;
   item.show();
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

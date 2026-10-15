@@ -66,7 +66,6 @@ export default defineConfig({
         // reasons it does and are covered by `test:integration` alongside it.
         'src/ui/panel/inspections.ts',
         'src/ui/panel/webviewHost.ts',
-        'src/ui/sidebarProvider.ts',
         'src/ui/terminalRunner.ts',
         'src/ui/webviewSecurity.ts',
         'src/webview/main.tsx',

@@ -75,8 +75,8 @@ describe('TerminalRunner', () => {
     );
   });
 
-  it('creates a fresh terminal when the cwd changes', async () => {
-    await runner.run({
+  it('opens a terminal for a new cwd, closing the old one only if its command is known to have finished', async () => {
+    const firstRun = await runner.run({
       argv: ['echo', 'first'],
       cwd: process.cwd(),
       description: 'test echo',
@@ -89,16 +89,27 @@ describe('TerminalRunner', () => {
       description: 'test echo',
     });
 
-    assert.equal(
-      orizzonteTerminals().length,
-      1,
-      'the old terminal for the previous cwd should not linger alongside the new one',
+    const terminals = orizzonteTerminals();
+    assert.ok(
+      terminals.some((terminal) => terminal !== first),
+      'a cwd change should have opened a new terminal',
     );
-    assert.notEqual(
-      orizzonteTerminals()[0],
-      first,
-      'a cwd change should have replaced the terminal instance',
-    );
+
+    if (firstRun.exitCode === undefined) {
+      // No shell integration, so nothing says the first command finished.
+      // Disposing its terminal here is what used to kill an install still in
+      // progress when a bulk action moved on to the next project.
+      assert.ok(
+        terminals.includes(first),
+        'a terminal whose command may still be running must not be closed',
+      );
+    } else {
+      assert.equal(
+        terminals.length,
+        1,
+        'a terminal known to be idle should not linger alongside the new one',
+      );
+    }
   });
 
   it('dispose() does not throw and cleans up its own listeners', async () => {

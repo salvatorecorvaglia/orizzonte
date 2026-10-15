@@ -9,6 +9,8 @@ import {
   currentVersion,
   declaredLabel,
   hasUpdate,
+  isUpdatable,
+  notUpdatableReason,
   scopeLabel,
 } from '../core/vocabulary.js';
 import { ECOSYSTEM_LABELS, formatBytes, formatDate } from './format.js';
@@ -27,6 +29,8 @@ interface Props {
    */
   changelogEntries: ChangelogEntry[] | undefined;
   changelogLoaded: boolean;
+  /** Why the release notes could not be fetched, when they could not. */
+  changelogError?: string;
   /** Which section the command that opened this drawer wants to land on. */
   reveal: 'details' | 'why';
   /**
@@ -38,6 +42,11 @@ interface Props {
    * reads and stay available.
    */
   busy?: boolean;
+  /**
+   * Changes whenever new scan data arrives. A rescan drops the "why" tree and
+   * the release notes this drawer asked for, so it asks again.
+   */
+  scanGeneration?: number;
   onClose: () => void;
   /** `toVersion` defaults to `latest` when the caller does not name one. */
   onUpdate: (dep: Dependency, toVersion?: string) => void;
@@ -49,8 +58,10 @@ export function DetailDrawer({
   why,
   changelogEntries,
   changelogLoaded,
+  changelogError,
   reveal,
   busy = false,
+  scanGeneration = 0,
   onClose,
   onUpdate,
   onUninstall,
@@ -61,10 +72,11 @@ export function DetailDrawer({
 
   // Metadata and the dependency tree are fetched lazily — pulling them for
   // every row up front would mean thousands of needless registry calls.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scanGeneration is a re-request trigger, not a value read here
   useEffect(() => {
     post({ type: 'requestDetails', depKey: dep.key });
     post({ type: 'requestWhy', depKey: dep.key });
-  }, [dep.key]);
+  }, [dep.key, scanGeneration]);
 
   /*
    * "Why Is This Installed?" opens this drawer specifically to answer that
@@ -171,8 +183,12 @@ export function DetailDrawer({
          * the second meant the safe upgrade was computed, displayed, and then
          * left to be applied by hand.
          */}
+        {!isUpdatable(dep) && (
+          <div className="muted">{notUpdatableReason(dep)}</div>
+        )}
         <div className="drawer__actions">
-          {dep.wanted &&
+          {isUpdatable(dep) &&
+            dep.wanted &&
             dep.wanted !== dep.installed &&
             dep.wanted !== dep.latest && (
               <button
@@ -184,7 +200,8 @@ export function DetailDrawer({
                 Update to {dep.wanted}
               </button>
             )}
-          {dep.latest &&
+          {isUpdatable(dep) &&
+            dep.latest &&
             dep.updateKind !== 'none' &&
             dep.updateKind !== 'unknown' && (
               <button
@@ -208,10 +225,12 @@ export function DetailDrawer({
        */}
       {hasUpdate(dep) &&
         dep.meta?.repository &&
-        (!changelogLoaded || changelogEntries) && (
+        (!changelogLoaded || changelogEntries || changelogError) && (
           <section>
             <h3>What&rsquo;s changed</h3>
-            {!changelogLoaded ? (
+            {changelogError ? (
+              <div className="muted">{changelogError}</div>
+            ) : !changelogLoaded ? (
               <div className="muted">Loading…</div>
             ) : changelogEntries!.length === 0 ? (
               <div className="muted">
@@ -421,10 +440,16 @@ export function DetailDrawer({
           </div>
         ) : (
           <>
+            {/*
+              The registry fallback is deps.dev's graph of what this package
+              *depends on* — a different question from why it is here. With no
+              lockfile the answer to that one is simply the manifest, so say
+              that, and label the tree as what it is.
+            */}
             <div className="muted drawer__why-source">
               {why.source === 'lockfile'
                 ? 'From this project’s lockfile.'
-                : 'Resolved from the registry — no local lockfile was found.'}
+                : `Declared directly in ${manifestFileName(dep.manifestPath)}. No lockfile was found to trace other paths, so this shows what ${dep.name} pulls in, from deps.dev.`}
             </div>
             <div className="tree">
               <NodeList nodes={why.roots} depth={0} />
@@ -434,6 +459,11 @@ export function DetailDrawer({
       </section>
     </aside>
   );
+}
+
+/** `packages/web/package.json` -> `package.json`, on either separator. */
+function manifestFileName(manifestPath: string): string {
+  return manifestPath.split(/[\\/]/).pop() ?? manifestPath;
 }
 
 function NodeList({ nodes, depth }: { nodes: DepNode[]; depth: number }) {

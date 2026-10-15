@@ -1,3 +1,12 @@
+/**
+ * The command each provider builds, one behaviour per test.
+ *
+ * These used to be a handful of "generates X, Y and Z" tests with a dozen
+ * assertions each, so a failure named a whole provider rather than the rule it
+ * broke — and a wrong argv could sit among the passing ones unnoticed, which is
+ * how `cargo remove` without `--dev` was pinned as correct.
+ */
+
 import { describe, expect, it } from 'vitest';
 import type {
   Dependency,
@@ -34,55 +43,69 @@ function makeDep(
 describe('CargoProvider commands', () => {
   const provider = new CargoProvider();
   const toolchain: Toolchain = { id: 'cargo', ecosystem: 'cargo', cwd: '/p' };
+  const serde = makeDep({
+    name: 'serde',
+    declared: '1.0.0',
+    scope: 'prod',
+    ecosystem: 'cargo',
+    manifestPath: '/p/Cargo.toml',
+  });
 
-  it('generates installCommand for prod, dev, and build scopes', () => {
-    expect(
-      provider.installCommand(toolchain, 'serde', '1.0.0', 'prod'),
-    ).toEqual({
-      argv: ['cargo', 'add', 'serde@1.0.0'],
-      cwd: '/p',
-      description: 'Add serde@1.0.0',
-    });
-    expect(provider.installCommand(toolchain, 'tokio', null, 'dev')).toEqual({
-      argv: ['cargo', 'add', 'tokio', '--dev'],
-      cwd: '/p',
-      description: 'Add tokio',
-    });
-    expect(provider.installCommand(toolchain, 'cc', '1.0', 'build')).toEqual({
-      argv: ['cargo', 'add', 'cc@1.0', '--build'],
-      cwd: '/p',
-      description: 'Add cc@1.0',
-    });
+  it.each([
+    [
+      'serde',
+      '1.0.0',
+      'prod',
+      ['cargo', 'add', 'serde@1.0.0'],
+      'Add serde@1.0.0',
+    ],
+    ['tokio', null, 'dev', ['cargo', 'add', 'tokio', '--dev'], 'Add tokio'],
+    ['cc', '1.0', 'build', ['cargo', 'add', 'cc@1.0', '--build'], 'Add cc@1.0'],
+  ] as const)(
+    'adds %s (%s) to the %s table',
+    (name, version, scope, argv, description) => {
+      expect(provider.installCommand(toolchain, name, version, scope)).toEqual({
+        argv,
+        cwd: '/p',
+        description,
+      });
+    },
+  );
+
+  it('refuses to install an invalid crate name', () => {
     expect(
       provider.installCommand(toolchain, 'invalid name!', '1.0', 'prod'),
     ).toBeNull();
   });
 
-  it('generates updateCommand, uninstallCommand, and updateAllCommand', () => {
-    const dep = makeDep({
-      name: 'serde',
-      declared: '1.0.0',
-      scope: 'prod',
-      ecosystem: 'cargo',
-      manifestPath: '/p/Cargo.toml',
-    });
-    expect(provider.updateCommand(toolchain, dep, '1.0.1')).toEqual({
+  it('updates by adding the new version', () => {
+    expect(provider.updateCommand(toolchain, serde, '1.0.1')).toEqual({
       argv: ['cargo', 'add', 'serde@1.0.1'],
       cwd: '/p',
       description: 'Add serde@1.0.1',
     });
-    expect(provider.uninstallCommand(toolchain, dep)).toEqual({
+  });
+
+  it('removes a crate', () => {
+    expect(provider.uninstallCommand(toolchain, serde)).toEqual({
       argv: ['cargo', 'remove', 'serde'],
       cwd: '/p',
       description: 'Remove serde',
     });
+  });
+
+  it('refuses to remove an invalid crate name', () => {
     expect(
-      provider.uninstallCommand(toolchain, { ...dep, name: 'bad name!' }),
+      provider.uninstallCommand(toolchain, { ...serde, name: 'bad name!' }),
     ).toBeNull();
+  });
+
+  it('updates everything within the declared ranges', () => {
     expect(provider.updateAllCommand(toolchain)).toEqual({
       argv: ['cargo', 'update'],
       cwd: '/p',
       description: 'Update all dependencies within their declared ranges',
+      reach: 'ranges',
     });
   });
 });
@@ -94,8 +117,16 @@ describe('ComposerProvider commands', () => {
     ecosystem: 'composer',
     cwd: '/p',
   };
+  const guzzle = makeDep({
+    name: 'guzzlehttp/guzzle',
+    declared: '^7.0',
+    scope: 'prod',
+    ecosystem: 'composer',
+    manifestPath: '/p/composer.json',
+  });
+  const devGuzzle: Dependency = { ...guzzle, scope: 'dev' };
 
-  it('generates installCommand for prod and dev scopes', () => {
+  it('requires a package', () => {
     expect(
       provider.installCommand(toolchain, 'guzzlehttp/guzzle', '^7.0', 'prod'),
     ).toEqual({
@@ -103,6 +134,9 @@ describe('ComposerProvider commands', () => {
       cwd: '/p',
       description: 'Require guzzlehttp/guzzle:^7.0',
     });
+  });
+
+  it('requires a dev package with --dev', () => {
     expect(
       provider.installCommand(toolchain, 'phpunit/phpunit', '^9.0', 'dev'),
     ).toEqual({
@@ -110,6 +144,9 @@ describe('ComposerProvider commands', () => {
       cwd: '/p',
       description: 'Require phpunit/phpunit:^9.0',
     });
+  });
+
+  it('refuses to install an invalid package name', () => {
     expect(
       provider.installCommand(
         toolchain,
@@ -120,43 +157,40 @@ describe('ComposerProvider commands', () => {
     ).toBeNull();
   });
 
-  it('generates updateCommand, uninstallCommand, and updateAllCommand', () => {
-    const dep = makeDep({
-      name: 'guzzlehttp/guzzle',
-      declared: '^7.0',
-      scope: 'prod',
-      ecosystem: 'composer',
-      manifestPath: '/p/composer.json',
-    });
-    const devDep: Dependency = { ...dep, scope: 'dev' };
-
+  it.each([
+    [guzzle, ['composer', 'require', 'guzzlehttp/guzzle:^7.5']],
+    [devGuzzle, ['composer', 'require', '--dev', 'guzzlehttp/guzzle:^7.5']],
+  ])('updates in the table the package lives in', (dep, argv) => {
     expect(provider.updateCommand(toolchain, dep, '^7.5')).toEqual({
-      argv: ['composer', 'require', 'guzzlehttp/guzzle:^7.5'],
+      argv,
       cwd: '/p',
       description: 'Require guzzlehttp/guzzle:^7.5',
     });
-    expect(provider.updateCommand(toolchain, devDep, '^7.5')).toEqual({
-      argv: ['composer', 'require', '--dev', 'guzzlehttp/guzzle:^7.5'],
-      cwd: '/p',
-      description: 'Require guzzlehttp/guzzle:^7.5',
-    });
+  });
+
+  it.each([
+    [guzzle, ['composer', 'remove', 'guzzlehttp/guzzle']],
+    [devGuzzle, ['composer', 'remove', '--dev', 'guzzlehttp/guzzle']],
+  ])('removes from the table the package lives in', (dep, argv) => {
     expect(provider.uninstallCommand(toolchain, dep)).toEqual({
-      argv: ['composer', 'remove', 'guzzlehttp/guzzle'],
+      argv,
       cwd: '/p',
       description: 'Remove guzzlehttp/guzzle',
     });
-    expect(provider.uninstallCommand(toolchain, devDep)).toEqual({
-      argv: ['composer', 'remove', '--dev', 'guzzlehttp/guzzle'],
-      cwd: '/p',
-      description: 'Remove guzzlehttp/guzzle',
-    });
+  });
+
+  it('refuses to remove an invalid package name', () => {
     expect(
-      provider.uninstallCommand(toolchain, { ...dep, name: 'bad name' }),
+      provider.uninstallCommand(toolchain, { ...guzzle, name: 'bad name' }),
     ).toBeNull();
+  });
+
+  it('updates everything within the declared constraints', () => {
     expect(provider.updateAllCommand(toolchain)).toEqual({
       argv: ['composer', 'update'],
       cwd: '/p',
       description: 'Update all packages within their declared constraints',
+      reach: 'ranges',
     });
   });
 });
@@ -164,8 +198,15 @@ describe('ComposerProvider commands', () => {
 describe('GoProvider commands', () => {
   const provider = new GoProvider();
   const toolchain: Toolchain = { id: 'go', ecosystem: 'golang', cwd: '/p' };
+  const gin = makeDep({
+    name: 'github.com/gin-gonic/gin',
+    declared: 'v1.9.0',
+    scope: 'prod',
+    ecosystem: 'golang',
+    manifestPath: '/p/go.mod',
+  });
 
-  it('generates installCommand, updateCommand, uninstallCommand, and updateAllCommand', () => {
+  it('gets a module at the requested version', () => {
     expect(
       provider.installCommand(
         toolchain,
@@ -178,6 +219,9 @@ describe('GoProvider commands', () => {
       cwd: '/p',
       description: 'Get github.com/gin-gonic/gin@v1.9.0',
     });
+  });
+
+  it('gets @latest when no version is requested', () => {
     expect(
       provider.installCommand(
         toolchain,
@@ -190,173 +234,104 @@ describe('GoProvider commands', () => {
       cwd: '/p',
       description: 'Get github.com/gin-gonic/gin@latest',
     });
+  });
 
-    const dep = makeDep({
-      name: 'github.com/gin-gonic/gin',
-      declared: 'v1.9.0',
-      scope: 'prod',
-      ecosystem: 'golang',
-      manifestPath: '/p/go.mod',
-    });
-    expect(provider.updateCommand(toolchain, dep, 'v1.9.1')).toEqual({
+  it('updates by getting the new version', () => {
+    expect(provider.updateCommand(toolchain, gin, 'v1.9.1')).toEqual({
       argv: ['go', 'get', 'github.com/gin-gonic/gin@v1.9.1'],
       cwd: '/p',
       description: 'Get github.com/gin-gonic/gin@v1.9.1',
     });
-    expect(provider.uninstallCommand(toolchain, dep)).toEqual({
+  });
+
+  it('removes a requirement with @none', () => {
+    expect(provider.uninstallCommand(toolchain, gin)).toEqual({
       argv: ['go', 'get', 'github.com/gin-gonic/gin@none'],
       cwd: '/p',
       description: 'Remove github.com/gin-gonic/gin',
     });
+  });
+
+  it('updates every module to its latest minor or patch release', () => {
     expect(provider.updateAllCommand(toolchain)).toEqual({
       argv: ['go', 'get', '-u', './...'],
       cwd: '/p',
       description: 'Update all modules to their latest minor/patch releases',
+      reach: 'ranges',
     });
   });
 });
 
 describe('NodeProvider commands', () => {
   const provider = new NodeProvider();
+  const toolchain = (id: 'npm' | 'pnpm' | 'yarn' | 'bun'): Toolchain => ({
+    id,
+    ecosystem: 'node',
+    cwd: '/p',
+  });
+  const react = makeDep({
+    name: 'react',
+    declared: '^18.0.0',
+    scope: 'prod',
+    ecosystem: 'node',
+    manifestPath: '/p/package.json',
+  });
 
-  it('generates installCommand for npm, yarn, pnpm, bun', () => {
-    const npm: Toolchain = { id: 'npm', ecosystem: 'node', cwd: '/p' };
-    const pnpm: Toolchain = { id: 'pnpm', ecosystem: 'node', cwd: '/p' };
-    const yarn: Toolchain = { id: 'yarn', ecosystem: 'node', cwd: '/p' };
-    const bun: Toolchain = { id: 'bun', ecosystem: 'node', cwd: '/p' };
+  it.each([
+    ['npm', ['npm', 'install', 'react@^18.0.0']],
+    ['pnpm', ['pnpm', 'add', 'react@^18.0.0']],
+    ['yarn', ['yarn', 'add', 'react@^18.0.0']],
+    ['bun', ['bun', 'add', 'react@^18.0.0']],
+  ] as const)('%s installs a package with its own verb', (id, argv) => {
+    expect(
+      provider.installCommand(toolchain(id), 'react', '^18.0.0', 'prod'),
+    ).toEqual({ argv, cwd: '/p', description: 'Install react@^18.0.0' });
+  });
 
-    expect(provider.installCommand(npm, 'react', '^18.0.0', 'prod')).toEqual({
-      argv: ['npm', 'install', 'react@^18.0.0'],
-      cwd: '/p',
-      description: 'Install react@^18.0.0',
-    });
-    expect(provider.installCommand(npm, 'vitest', '^2.0.0', 'dev')).toEqual({
-      argv: ['npm', 'install', 'vitest@^2.0.0', '--save-dev'],
-      cwd: '/p',
-      description: 'Install vitest@^2.0.0 as a dev dependency',
-    });
-    expect(provider.installCommand(pnpm, 'react', '^18.0.0', 'prod')).toEqual({
-      argv: ['pnpm', 'add', 'react@^18.0.0'],
-      cwd: '/p',
-      description: 'Install react@^18.0.0',
-    });
-    expect(provider.installCommand(pnpm, 'vitest', '^2.0.0', 'dev')).toEqual({
-      argv: ['pnpm', 'add', 'vitest@^2.0.0', '--save-dev'],
-      cwd: '/p',
-      description: 'Install vitest@^2.0.0 as a dev dependency',
-    });
-    expect(provider.installCommand(yarn, 'react', '^18.0.0', 'prod')).toEqual({
-      argv: ['yarn', 'add', 'react@^18.0.0'],
-      cwd: '/p',
-      description: 'Install react@^18.0.0',
-    });
-    expect(provider.installCommand(yarn, 'vitest', '^2.0.0', 'dev')).toEqual({
-      argv: ['yarn', 'add', 'vitest@^2.0.0', '--dev'],
-      cwd: '/p',
-      description: 'Install vitest@^2.0.0 as a dev dependency',
-    });
-    expect(provider.installCommand(bun, 'react', '^18.0.0', 'prod')).toEqual({
-      argv: ['bun', 'add', 'react@^18.0.0'],
-      cwd: '/p',
-      description: 'Install react@^18.0.0',
-    });
-    expect(provider.installCommand(bun, 'vitest', '^2.0.0', 'dev')).toEqual({
-      argv: ['bun', 'add', 'vitest@^2.0.0', '--dev'],
+  it.each([
+    ['npm', ['npm', 'install', 'vitest@^2.0.0', '--save-dev']],
+    ['pnpm', ['pnpm', 'add', 'vitest@^2.0.0', '--save-dev']],
+    ['yarn', ['yarn', 'add', 'vitest@^2.0.0', '--dev']],
+    ['bun', ['bun', 'add', 'vitest@^2.0.0', '--dev']],
+  ] as const)('%s installs a dev dependency with its own flag', (id, argv) => {
+    expect(
+      provider.installCommand(toolchain(id), 'vitest', '^2.0.0', 'dev'),
+    ).toEqual({
+      argv,
       cwd: '/p',
       description: 'Install vitest@^2.0.0 as a dev dependency',
     });
   });
 
-  it('preserves the declared range prefix when updating', () => {
-    const npm: Toolchain = { id: 'npm', ecosystem: 'node', cwd: '/p' };
-    const pnpm: Toolchain = { id: 'pnpm', ecosystem: 'node', cwd: '/p' };
+  it.each([
+    ['caret', '^18.2.0', '18.3.1', 'react@^18.3.1'],
+    ['tilde', '~4.17.0', '4.17.21', 'react@~4.17.21'],
+    // An exact pin was a deliberate choice; updating must not silently widen
+    // it into a range.
+    ['exact pin', '2.19.5', '2.21.0', 'react@2.21.0'],
+    // A compound range has no single operator worth carrying over.
+    ['compound range', '>=1.0.0 <2', '1.3.0', 'react@1.3.0'],
+  ])(
+    'keeps a %s constraint style when updating',
+    (_style, declared, toVersion, spec) => {
+      expect(
+        provider.updateCommand(
+          toolchain('npm'),
+          { ...react, declared },
+          toVersion,
+        )?.argv,
+      ).toEqual(['npm', 'install', spec]);
+    },
+  );
 
-    const caretDep = makeDep({
-      name: 'react',
-      declared: '^18.2.0',
-      scope: 'prod',
-      ecosystem: 'node',
-      manifestPath: '/p/package.json',
-    });
-    expect(provider.updateCommand(npm, caretDep, '18.3.1')).toEqual({
-      argv: ['npm', 'install', 'react@^18.3.1'],
-      cwd: '/p',
-      description: 'Install react@^18.3.1',
-    });
-
-    const tildeDep = makeDep({
-      name: 'lodash',
-      declared: '~4.17.0',
-      scope: 'prod',
-      ecosystem: 'node',
-      manifestPath: '/p/package.json',
-    });
-    expect(provider.updateCommand(npm, tildeDep, '4.17.21')).toEqual({
-      argv: ['npm', 'install', 'lodash@~4.17.21'],
-      cwd: '/p',
-      description: 'Install lodash@~4.17.21',
-    });
-
-    // An exact pin was a deliberate choice; updating must not silently
-    // widen it into a range.
-    const pinnedDep = makeDep({
-      name: 'proj4',
-      declared: '2.19.5',
-      scope: 'prod',
-      ecosystem: 'node',
-      manifestPath: '/p/package.json',
-    });
-    expect(provider.updateCommand(pnpm, pinnedDep, '2.21.0')).toEqual({
-      argv: ['pnpm', 'add', 'proj4@2.21.0'],
-      cwd: '/p',
-      description: 'Install proj4@2.21.0',
-    });
-
-    const compoundDep = makeDep({
-      name: 'left-pad',
-      declared: '>=1.0.0 <2',
-      scope: 'prod',
-      ecosystem: 'node',
-      manifestPath: '/p/package.json',
-    });
-    expect(provider.updateCommand(npm, compoundDep, '1.3.0')).toEqual({
-      argv: ['npm', 'install', 'left-pad@1.3.0'],
-      cwd: '/p',
-      description: 'Install left-pad@1.3.0',
-    });
-  });
-
-  it('generates uninstallCommand for npm, yarn, pnpm, bun', () => {
-    const npm: Toolchain = { id: 'npm', ecosystem: 'node', cwd: '/p' };
-    const pnpm: Toolchain = { id: 'pnpm', ecosystem: 'node', cwd: '/p' };
-    const yarn: Toolchain = { id: 'yarn', ecosystem: 'node', cwd: '/p' };
-    const bun: Toolchain = { id: 'bun', ecosystem: 'node', cwd: '/p' };
-
-    const dep = makeDep({
-      name: 'react',
-      declared: '^18.0.0',
-      scope: 'prod',
-      ecosystem: 'node',
-      manifestPath: '/p/package.json',
-    });
-
-    expect(provider.uninstallCommand(npm, dep)).toEqual({
-      argv: ['npm', 'uninstall', 'react'],
-      cwd: '/p',
-      description: 'Uninstall react',
-    });
-    expect(provider.uninstallCommand(pnpm, dep)).toEqual({
-      argv: ['pnpm', 'remove', 'react'],
-      cwd: '/p',
-      description: 'Uninstall react',
-    });
-    expect(provider.uninstallCommand(yarn, dep)).toEqual({
-      argv: ['yarn', 'remove', 'react'],
-      cwd: '/p',
-      description: 'Uninstall react',
-    });
-    expect(provider.uninstallCommand(bun, dep)).toEqual({
-      argv: ['bun', 'remove', 'react'],
+  it.each([
+    ['npm', ['npm', 'uninstall', 'react']],
+    ['pnpm', ['pnpm', 'remove', 'react']],
+    ['yarn', ['yarn', 'remove', 'react']],
+    ['bun', ['bun', 'remove', 'react']],
+  ] as const)('%s uninstalls with its own verb', (id, argv) => {
+    expect(provider.uninstallCommand(toolchain(id), react)).toEqual({
+      argv,
       cwd: '/p',
       description: 'Uninstall react',
     });
@@ -366,60 +341,63 @@ describe('NodeProvider commands', () => {
 describe('PythonProvider commands', () => {
   const provider = new PythonProvider();
   const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
+  const toolchain = (id: 'pip' | 'uv' | 'poetry'): Toolchain => ({
+    id,
+    ecosystem: 'python',
+    cwd: '/p',
+  });
+  const requests = makeDep({
+    name: 'requests',
+    declared: '2.31.0',
+    scope: 'prod',
+    ecosystem: 'python',
+    manifestPath: '/p/requirements.txt',
+  });
 
-  it('generates installCommand for pip, uv, poetry', () => {
-    const pip: Toolchain = { id: 'pip', ecosystem: 'python', cwd: '/p' };
-    const uv: Toolchain = { id: 'uv', ecosystem: 'python', cwd: '/p' };
-    const poetry: Toolchain = { id: 'poetry', ecosystem: 'python', cwd: '/p' };
-
-    expect(provider.installCommand(pip, 'requests', '2.31.0', 'prod')).toEqual({
+  it('installs with pip, pairing it with a manifest edit', () => {
+    expect(
+      provider.installCommand(toolchain('pip'), 'requests', '2.31.0', 'prod'),
+    ).toEqual({
       argv: [pythonBin, '-m', 'pip', 'install', 'requests==2.31.0'],
       cwd: '/p',
       description: 'Install requests==2.31.0 with pip',
       writesManifest: false,
     });
-    expect(provider.installCommand(uv, 'requests', '2.31.0', 'prod')).toEqual({
-      argv: ['uv', 'add', 'requests==2.31.0'],
-      cwd: '/p',
-      description: 'Add requests==2.31.0 with uv',
-    });
-    expect(
-      provider.installCommand(poetry, 'requests', '2.31.0', 'prod'),
-    ).toEqual({
-      argv: ['poetry', 'add', 'requests==2.31.0'],
-      cwd: '/p',
-      description: 'Add requests==2.31.0 with Poetry',
-    });
   });
 
-  it('generates uninstallCommand for pip, uv, poetry', () => {
-    const pip: Toolchain = { id: 'pip', ecosystem: 'python', cwd: '/p' };
-    const uv: Toolchain = { id: 'uv', ecosystem: 'python', cwd: '/p' };
-    const poetry: Toolchain = { id: 'poetry', ecosystem: 'python', cwd: '/p' };
+  it.each([
+    ['uv', ['uv', 'add', 'requests==2.31.0'], 'Add requests==2.31.0 with uv'],
+    [
+      'poetry',
+      ['poetry', 'add', 'requests==2.31.0'],
+      'Add requests==2.31.0 with Poetry',
+    ],
+  ] as const)(
+    'installs with %s, which writes the manifest itself',
+    (id, argv, description) => {
+      expect(
+        provider.installCommand(toolchain(id), 'requests', '2.31.0', 'prod'),
+      ).toEqual({ argv, cwd: '/p', description });
+    },
+  );
 
-    const dep = makeDep({
-      name: 'requests',
-      declared: '2.31.0',
-      scope: 'prod',
-      ecosystem: 'python',
-      manifestPath: '/p/requirements.txt',
-    });
-
-    expect(provider.uninstallCommand(pip, dep)).toEqual({
+  it('uninstalls with pip, pairing it with a manifest edit', () => {
+    expect(provider.uninstallCommand(toolchain('pip'), requests)).toEqual({
       argv: [pythonBin, '-m', 'pip', 'uninstall', '-y', 'requests'],
       cwd: '/p',
       description: 'Uninstall requests with pip',
       writesManifest: false,
     });
-    expect(provider.uninstallCommand(uv, dep)).toEqual({
-      argv: ['uv', 'remove', 'requests'],
+  });
+
+  it.each([
+    ['uv', ['uv', 'remove', 'requests'], 'Remove requests with uv'],
+    ['poetry', ['poetry', 'remove', 'requests'], 'Remove requests with Poetry'],
+  ] as const)('uninstalls with %s', (id, argv, description) => {
+    expect(provider.uninstallCommand(toolchain(id), requests)).toEqual({
+      argv,
       cwd: '/p',
-      description: 'Remove requests with uv',
-    });
-    expect(provider.uninstallCommand(poetry, dep)).toEqual({
-      argv: ['poetry', 'remove', 'requests'],
-      cwd: '/p',
-      description: 'Remove requests with Poetry',
+      description,
     });
   });
 });
@@ -427,25 +405,30 @@ describe('PythonProvider commands', () => {
 describe('GradleProvider and MavenProvider commands', () => {
   const gradle = new GradleProvider();
   const maven = new MavenProvider();
-  const toolchainG: Toolchain = {
-    id: 'gradle',
-    ecosystem: 'gradle',
-    cwd: '/p',
-  };
-  const toolchainM: Toolchain = { id: 'maven', ecosystem: 'maven', cwd: '/p' };
 
-  it('returns commands or null for Gradle and Maven', () => {
+  it('leaves Gradle installs to a build-file edit', () => {
     expect(gradle.installCommand()).toBeNull();
-    expect(gradle.updateAllCommand(toolchainG)).toEqual({
-      argv: ['gradle', 'dependencies', '--write-locks'],
-      cwd: '/p',
-      description: 'Refresh Gradle dependency locks',
-    });
+  });
+
+  it('has no Gradle bulk command, so the host updates each package instead', () => {
+    // Gradle has no command that updates declared versions.
+    expect(
+      gradle.updateAllCommand({ id: 'gradle', ecosystem: 'gradle', cwd: '/p' }),
+    ).toBeNull();
+  });
+
+  it('leaves Maven installs to a POM edit', () => {
     expect(maven.installCommand()).toBeNull();
-    expect(maven.updateAllCommand(toolchainM)).toEqual({
+  });
+
+  it('bulk-updates Maven to the latest releases, and says so', () => {
+    expect(
+      maven.updateAllCommand({ id: 'maven', ecosystem: 'maven', cwd: '/p' }),
+    ).toEqual({
       argv: ['mvn', 'versions:use-latest-releases'],
       cwd: '/p',
       description: 'Rewrite dependency versions to the latest releases',
+      reach: 'latest',
     });
   });
 });

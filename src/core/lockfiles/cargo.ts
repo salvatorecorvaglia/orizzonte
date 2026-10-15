@@ -7,7 +7,7 @@
  */
 
 import { splitTomlPackageBlocks, tomlField } from './toml.js';
-import { addVersion, type LockfileReader } from './types.js';
+import { addResolved, addVersion, type LockfileReader } from './types.js';
 
 export const cargoLockfile: LockfileReader = {
   file: 'Cargo.lock',
@@ -37,5 +37,15 @@ export const cargoLockfile: LockfileReader = {
       if (name && version) addVersion(versions, name, version);
     }
     return versions;
+  },
+
+  resolved(text) {
+    const all = new Map<string, string[]>();
+    for (const block of splitTomlPackageBlocks(text)) {
+      const name = tomlField(block, 'name');
+      const version = tomlField(block, 'version');
+      if (name && version) addResolved(all, name, version);
+    }
+    return { all };
   },
 };

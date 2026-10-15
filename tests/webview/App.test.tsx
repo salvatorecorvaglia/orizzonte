@@ -192,16 +192,41 @@ describe('notices and errors', () => {
 
     // Dismissing reveals the one behind it rather than discarding the queue.
     await userEvent.click(
-      within(alert).getByRole('button', { name: /Dismiss/i }),
+      within(alert).getByRole('button', { name: /Dismiss error/i }),
     );
     expect(screen.getByRole('alert')).toHaveTextContent('first failure');
 
     await userEvent.click(
       within(screen.getByRole('alert')).getByRole('button', {
-        name: /Dismiss/i,
+        name: /Dismiss error/i,
       }),
     );
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('clears the whole queue with Dismiss all', async () => {
+    renderLoaded();
+    send({ type: 'error', message: 'first failure' });
+    send({ type: 'error', message: 'second failure' });
+    send({ type: 'error', message: 'third failure' });
+
+    await userEvent.click(
+      within(screen.getByRole('alert')).getByRole('button', {
+        name: 'Dismiss all',
+      }),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('offers no Dismiss all for a single error', () => {
+    renderLoaded();
+    send({ type: 'error', message: 'only failure' });
+
+    expect(
+      within(screen.getByRole('alert')).queryByRole('button', {
+        name: 'Dismiss all',
+      }),
+    ).toBeNull();
   });
 
   it('does not queue a repeat of the message already on screen', () => {
@@ -1107,5 +1132,76 @@ describe('panel exclusivity', () => {
     expect(
       screen.getByRole('menuitem', { name: /Compare with/i }),
     ).toHaveAttribute('aria-expanded', 'true');
+  });
+});
+
+describe('a project with no dependencies yet', () => {
+  /*
+   * A manifest that declares nothing never becomes a group, so a brand-new
+   * project could not receive its first dependency: the panel said no
+   * manifests were found, and the install panel had no target.
+   */
+  it('shows the panel and offers the manifest as an install target', async () => {
+    render(<App />);
+    send({
+      type: 'state',
+      groups: [],
+      summary: EMPTY_SUMMARY,
+      manifests: [
+        {
+          manifestPath: '/new/package.json',
+          label: 'new-app',
+          ecosystem: 'node',
+        },
+      ],
+    });
+
+    expect(screen.queryByText('No dependency manifests found')).toBeNull();
+    expect(screen.getByText('No dependencies declared')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /Add package/i }));
+    const target = screen.getByLabelText('Install into');
+    expect(
+      within(target).getByRole('option', { name: 'new-app' }),
+    ).toBeInTheDocument();
+  });
+
+  it('still says so when there really are no manifests', () => {
+    render(<App />);
+    send({ type: 'state', groups: [], summary: EMPTY_SUMMARY, manifests: [] });
+    expect(
+      screen.getByText('No dependency manifests found'),
+    ).toBeInTheDocument();
+  });
+});
+
+describe('filtered count', () => {
+  it('says how many packages the filters leave on screen', async () => {
+    const current = group({
+      dependencies: [
+        { ...group().dependencies[0] },
+        {
+          ...group().dependencies[0],
+          key: 'lodash',
+          name: 'lodash',
+          updateKind: 'none',
+        },
+      ],
+    });
+    render(<App />);
+    send({
+      type: 'state',
+      groups: [current],
+      summary: { ...EMPTY_SUMMARY, totalDependencies: 2, outdated: 1 },
+    });
+
+    // Opens narrowed to "outdated": one of two rows.
+    expect(screen.getAllByRole('status')[0]).toHaveTextContent(
+      '1 of 2 packages',
+    );
+
+    await showEveryPackage();
+    expect(screen.getAllByRole('status')[0]).toHaveTextContent('2 packages');
+    expect(screen.getAllByRole('status')[0]).not.toHaveTextContent('of 2');
   });
 });

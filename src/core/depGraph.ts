@@ -9,10 +9,6 @@
 
 import * as path from 'node:path';
 import type { ProviderContext } from '../providers/provider.js';
-// The one PEP 503 implementation. A second copy lived here to avoid depending
-// on a provider, but this file already imports the provider registry, and two
-// normalisers that must agree exactly are two that can silently stop agreeing.
-import { normalizeName as normalizePythonName } from '../providers/python/index.js';
 import { providerFor } from '../providers/registry.js';
 import {
   type ForwardGraph,
@@ -25,6 +21,10 @@ import {
   type ReadFile,
   selectLockfile,
 } from './lockfiles/resolve.js';
+// The one PEP 503 implementation. A second copy lived here to avoid depending
+// on a provider, but this file already imports the provider registry, and two
+// normalisers that must agree exactly are two that can silently stop agreeing.
+import { normalizeName as normalizePythonName } from './pep503.js';
 import type {
   Dependency,
   DependencyDiffEntry,
@@ -397,6 +397,79 @@ async function collectVersions(
     ctx.workspaceRootFor(dir),
     ctx.lockfileMemo && { store: ctx.lockfileMemo, namespace: 'versions' },
   );
+}
+
+/**
+ * The lockfile that governs `dir`: the one `collectVersionsFrom` would read.
+ *
+ * In a workspace every member resolves the same root lockfile, so a
+ * workspace-wide check that reports per project repeats that file's findings
+ * once per member. Knowing which file answered is what lets the caller report
+ * it once — see `mergeSharedLockfiles`.
+ */
+export async function lockfilePathFor(
+  dir: string,
+  ecosystem: Ecosystem,
+  readFile: ReadFile,
+  stopAt?: string,
+  memo?: LockfileMemo,
+): Promise<string | undefined> {
+  return selectLockfile(
+    dir,
+    lockfilesFor(ecosystem),
+    readFile,
+    stopAt,
+    (lockfile, text, absolutePath) =>
+      lockfile.versions(text) ? absolutePath : undefined,
+    memo,
+  );
+}
+
+/**
+ * Collapses per-project results that came from one shared lockfile into a
+ * single entry, labelled as covering all of them.
+ *
+ * The entry kept is the project that sits beside the lockfile — the workspace
+ * root — when it is among them, since that is where the file lives. Results
+ * with no lockfile (nothing to share) pass through untouched, and the order of
+ * first appearance is kept.
+ */
+export function mergeSharedLockfiles<
+  T extends { manifestPath: string; projectLabel: string },
+>(results: T[], lockfileOf: (result: T) => string | undefined): T[] {
+  const byLockfile = new Map<string, T[]>();
+  const order: Array<T | string> = [];
+
+  for (const result of results) {
+    const lockfile = lockfileOf(result);
+    if (!lockfile) {
+      order.push(result);
+      continue;
+    }
+    const sharing = byLockfile.get(lockfile);
+    if (sharing) sharing.push(result);
+    else {
+      byLockfile.set(lockfile, [result]);
+      order.push(lockfile);
+    }
+  }
+
+  return order.map((entry) => {
+    if (typeof entry !== 'string') return entry;
+    const sharing = byLockfile.get(entry) ?? [];
+    const lockDir = path.dirname(entry);
+    const representative =
+      sharing.find((result) => path.dirname(result.manifestPath) === lockDir) ??
+      sharing[0];
+    if (sharing.length === 1) return representative;
+    const others = sharing.length - 1;
+    return {
+      ...representative,
+      projectLabel: `${representative.projectLabel} and ${others} other project${
+        others === 1 ? '' : 's'
+      } sharing ${path.basename(entry)}`,
+    };
+  });
 }
 
 /**

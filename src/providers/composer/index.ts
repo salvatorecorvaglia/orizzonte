@@ -8,7 +8,7 @@
 import * as path from 'node:path';
 import { parse as parseJsonc } from 'jsonc-parser';
 import { cacheKey } from '../../core/cache.js';
-import { selectLockfile } from '../../core/lockfiles/resolve.js';
+import { readInstalledVersions } from '../../core/lockfiles/installed.js';
 import type {
   Dependency,
   DepScope,
@@ -17,6 +17,7 @@ import type {
   SearchResult,
   Toolchain,
 } from '../../core/types.js';
+import { applyDeclaredPrefix } from '../../core/versions/index.js';
 import {
   type Command,
   dependencyKey,
@@ -136,41 +137,20 @@ export class ComposerProvider implements EcosystemProvider {
   }
 
   /**
-   * Resolved versions from the nearest lockfile at or above `manifestDir`.
-   *
-   * The walk matters for workspaces, where only the root carries a lockfile —
-   * see `core/lockfiles/resolve.ts`.
+   * Resolved versions from the nearest composer.lock at or above
+   * `manifestDir` — see `core/lockfiles/installed.ts`.
    */
   async readLockfile(
     manifestDir: string,
     ctx: ProviderContext,
+    dependencies: Dependency[] = [],
   ): Promise<Map<string, string>> {
-    const found = await selectLockfile(
+    return readInstalledVersions(
+      'composer',
       manifestDir,
-      [{ file: 'composer.lock' }],
-      (absolutePath) => ctx.readFile(absolutePath),
-      ctx.workspaceRootFor(manifestDir),
-      (_candidate, text) => {
-        const resolved = new Map<string, string>();
-        try {
-          const lock = JSON.parse(text) as {
-            packages?: Array<{ name: string; version: string }>;
-            'packages-dev'?: Array<{ name: string; version: string }>;
-          };
-          for (const entry of [
-            ...(lock.packages ?? []),
-            ...(lock['packages-dev'] ?? []),
-          ]) {
-            resolved.set(entry.name, entry.version.replace(/^v/, ''));
-          }
-        } catch {
-          // Ignore malformed lockfiles.
-        }
-        return resolved.size > 0 ? resolved : undefined;
-      },
-      ctx.lockfileMemo && { store: ctx.lockfileMemo, namespace: 'resolved' },
+      ctx,
+      dependencies.map((dep) => ({ name: dep.name, declared: dep.declared })),
     );
-    return found ?? new Map<string, string>();
   }
 
   async detectToolchain(
@@ -224,6 +204,7 @@ export class ComposerProvider implements EcosystemProvider {
       // anything that is not a real Packagist name cannot resolve, and should
       // not be pasted into a URL to find that out.
       (name) => this.isValidPackageName(name),
+      'composer',
     );
   }
 
@@ -327,7 +308,15 @@ export class ComposerProvider implements EcosystemProvider {
     dep: Dependency,
     toVersion: string,
   ): Command | null {
-    return this.installCommand(toolchain, dep.name, toVersion, dep.scope);
+    // `composer require vendor/pkg:1.2.3` writes that exact pin over a `^1.2`
+    // constraint. Carrying the operator keeps the project's style, the way
+    // the Node provider does.
+    return this.installCommand(
+      toolchain,
+      dep.name,
+      applyDeclaredPrefix(dep.declared, toVersion),
+      dep.scope,
+    );
   }
 
   uninstallCommand(toolchain: Toolchain, dep: Dependency): Command | null {
@@ -349,6 +338,7 @@ export class ComposerProvider implements EcosystemProvider {
       argv: ['composer', 'update'],
       cwd: toolchain.cwd,
       description: 'Update all packages within their declared constraints',
+      reach: 'ranges',
     };
   }
 }

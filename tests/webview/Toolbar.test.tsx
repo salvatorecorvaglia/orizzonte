@@ -125,6 +125,17 @@ describe('the summary line', () => {
     renderToolbar({ summary: { ...SUMMARY, stale: true } });
     expect(screen.getByRole('status')).toHaveTextContent('cached');
   });
+
+  it('says when the vulnerability check could not finish', () => {
+    // Zero vulnerable from a failed audit must not read as a clean result.
+    renderToolbar({ summary: { ...SUMMARY, auditIncomplete: true } });
+    expect(screen.getByRole('status')).toHaveTextContent('audit incomplete');
+  });
+
+  it('says nothing about the audit when it completed', () => {
+    renderToolbar();
+    expect(screen.getByRole('status')).not.toHaveTextContent('audit');
+  });
 });
 
 describe('actions', () => {

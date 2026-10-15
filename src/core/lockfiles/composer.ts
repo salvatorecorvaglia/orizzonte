@@ -5,7 +5,7 @@
  * readers walk the same concatenation of them.
  */
 
-import { addVersion, type LockfileReader } from './types.js';
+import { addResolved, addVersion, type LockfileReader } from './types.js';
 
 interface ComposerEntry {
   name: string;
@@ -58,5 +58,20 @@ export const composerLockfile: LockfileReader = {
       if (entry.version) addVersion(versions, entry.name, entry.version);
     }
     return versions;
+  },
+
+  resolved(text) {
+    const all = entries(text);
+    if (!all) return undefined;
+
+    const resolved = new Map<string, string[]>();
+    for (const entry of all) {
+      // `v3.5.0` and `3.5.0` are the same release; registries answer with
+      // the second, so the comparison has to use it too.
+      if (entry.version) {
+        addResolved(resolved, entry.name, entry.version.replace(/^v/, ''));
+      }
+    }
+    return { all: resolved };
   },
 };

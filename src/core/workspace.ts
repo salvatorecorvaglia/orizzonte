@@ -57,13 +57,26 @@ export function createProviderContext(
     registryAuthHeaders(
       ecosystem: Ecosystem,
     ): Record<string, string> | undefined {
-      // Same restriction as registryOverride — this is a sub-field of the
-      // same setting, not a separate one, so it inherits the same trust gate
-      // without needing its own entry in restrictedConfigurations.
-      const overrides = vscode.workspace
-        .getConfiguration('orizzonte')
-        .get<Record<string, RegistryOverrideValue>>('registryOverrides', {});
-      return resolveRegistryAuthHeaders(overrides, ecosystem);
+      // The token's variable name is read from the user's own settings only.
+      // restrictedConfigurations keeps workspace values out of *untrusted*
+      // workspaces, but trusting a folder is not agreeing to let its
+      // settings.json choose which environment variable is sent where — see
+      // `resolveRegistryAuthHeaders`.
+      const config = vscode.workspace.getConfiguration('orizzonte');
+      const trusted =
+        config.inspect<Record<string, RegistryOverrideValue>>(
+          'registryOverrides',
+        )?.globalValue ?? {};
+      const effective = config.get<Record<string, RegistryOverrideValue>>(
+        'registryOverrides',
+        {},
+      );
+      return resolveRegistryAuthHeaders(
+        trusted,
+        ecosystem,
+        process.env,
+        effective,
+      );
     },
 
     workspaceRootFor(absolutePath: string): string | undefined {

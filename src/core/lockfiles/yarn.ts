@@ -12,7 +12,12 @@
  * a silently empty answer that reads identically to a clean one.
  */
 
-import { addEdges, addVersion, type LockfileReader } from './types.js';
+import {
+  addEdges,
+  addResolved,
+  addVersion,
+  type LockfileReader,
+} from './types.js';
 
 /** Berry's schema-version header, which parses as a block but is not one. */
 const METADATA_BLOCK = '__metadata';
@@ -29,6 +34,8 @@ export function yarnNameFromSpec(spec: string): string | undefined {
 
 interface YarnBlock {
   name: string;
+  /** Every `name@range` the header lists; they all resolved to this block. */
+  specs: string[];
   /** The block's lines with the header removed, still indented. */
   body: string[];
   /** The block verbatim, for line-oriented matches like the version. */
@@ -50,15 +57,15 @@ function* blocks(text: string): Generator<YarnBlock> {
     if (header.startsWith('#') || !header.endsWith(':')) continue;
 
     // The header can list several specs; they all resolve to the same package.
-    const firstSpec = header
+    const specs = header
       .slice(0, -1)
-      .split(',')[0]
-      .trim()
-      .replace(/^['"]|['"]$/g, '');
-    const name = yarnNameFromSpec(firstSpec);
+      .split(',')
+      .map((spec) => spec.trim().replace(/^['"]|['"]$/g, ''))
+      .filter(Boolean);
+    const name = specs[0] && yarnNameFromSpec(specs[0]);
     if (!name || name === METADATA_BLOCK) continue;
 
-    yield { name, body: lines.slice(1), text: block };
+    yield { name, specs, body: lines.slice(1), text: block };
   }
 }
 
@@ -101,5 +108,36 @@ export const yarnLockfile: LockfileReader = {
       if (match) addVersion(versions, block.name, match[1]);
     }
     return versions.size > 0 ? versions : undefined;
+  },
+
+  /**
+   * A project using two majors of one package has two blocks for it, and the
+   * first one is not necessarily the one the manifest asked for. The header
+   * says which range each block answers, so the range the manifest declares
+   * finds its own block.
+   */
+  resolved(text) {
+    const all = new Map<string, string[]>();
+    const descriptors = new Map<string, string>();
+
+    for (const block of blocks(text)) {
+      const version = VERSION_LINE.exec(block.text)?.[1];
+      if (!version) continue;
+      addResolved(all, block.name, version);
+      for (const spec of block.specs) {
+        descriptors.set(spec, version);
+        // Berry spells a registry range `lodash@npm:^4.17.0`; the manifest
+        // spells it `^4.17.0`.
+        const at = spec.lastIndexOf('@');
+        if (spec.slice(at + 1).startsWith('npm:')) {
+          descriptors.set(
+            `${spec.slice(0, at)}@${spec.slice(at + 1 + 'npm:'.length)}`,
+            version,
+          );
+        }
+      }
+    }
+
+    return all.size > 0 ? { all, descriptors } : undefined;
   },
 };

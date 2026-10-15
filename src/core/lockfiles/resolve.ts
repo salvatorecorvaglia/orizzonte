@@ -137,6 +137,39 @@ export async function selectLockfile<T extends { file: string }, R>(
 }
 
 /**
+ * `startDir` and each ancestor up to and including `stopAt`, nearest first.
+ *
+ * The same walk `selectLockfile` does, for callers that probe for something
+ * other than one lockfile's contents — toolchain detection asks "does any of
+ * these files exist here", which an empty or binary lockfile answers just as
+ * well as a parseable one.
+ *
+ * Without a boundary only `startDir` itself is returned: an unbounded walk
+ * from a file outside any workspace folder would wander into the user's home
+ * directory and mistake whatever it found there for this project's setup.
+ */
+export function ancestorDirectories(
+  startDir: string,
+  stopAt: string | undefined,
+): string[] {
+  const start = normalizeDir(startDir);
+  if (!stopAt) return [start];
+
+  const boundary = normalizeDir(stopAt);
+  if (!isWithin(start, boundary)) return [start];
+
+  const dirs: string[] = [];
+  let dir = start;
+  for (;;) {
+    dirs.push(dir);
+    if (dir === boundary) return dirs;
+    const parent = path.dirname(dir);
+    if (parent === dir) return dirs;
+    dir = parent;
+  }
+}
+
+/**
  * Trims trailing separators so two spellings of one directory compare equal.
  *
  * Deliberately *not* `path.resolve`: these paths already arrive absolute (from

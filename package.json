@@ -3,7 +3,7 @@
   "displayName": "Orizzonte - Universal Visual Package Manager",
   "description": "Universal Visual Package Manager for Visual Studio Code",
   "icon": "resources/orizzonte.png",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "packageManager": "pnpm@11.23.0",
   "publisher": "orizzonte",
   "license": "MIT",
@@ -109,7 +109,6 @@
     "views": {
       "orizzonte": [
         {
-          "type": "webview",
           "id": "orizzonte.sidebar",
           "name": "Orizzonte",
           "contextualTitle": "Orizzonte",
@@ -117,6 +116,12 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "orizzonte.sidebar",
+        "contents": "See every dependency in this workspace, with updates, vulnerabilities and licenses, across npm, PyPI, Cargo, Go, Composer, Maven and Gradle.\n[Open Orizzonte](command:orizzonte.open)\n[Search Packages](command:orizzonte.searchInstall)\n[Source code](https://github.com/salvatorecorvaglia/orizzonte) · [Report an issue](https://github.com/salvatorecorvaglia/orizzonte/issues) · [Release notes](https://github.com/salvatorecorvaglia/orizzonte/releases)"
+      }
+    ],
     "menus": {
       "commandPalette": [
         {
@@ -161,7 +166,7 @@
           "description": "Automatically check registries for newer versions when the panel opens and when manifests change."
         },
         "orizzonte.checkIntervalMinutes": {
-          "type": "number",
+          "type": "integer",
           "default": 60,
           "minimum": 0,
           "maximum": 10080,
@@ -215,12 +220,12 @@
             "**/fixtures/**",
             "**/__tests__/**"
           ],
-          "description": "Glob patterns to skip when scanning for manifest files."
+          "description": "Glob patterns to skip when scanning for manifest files. The defaults also skip test, tests, fixtures and __tests__ directories, so test fixtures do not show up as projects — remove those entries to scan a real project that lives under one."
         },
         "orizzonte.registryOverrides": {
           "type": "object",
           "default": {},
-          "description": "Override registry base URLs per ecosystem. A value can be a bare URL, e.g. { \"npm\": \"https://registry.mycompany.com\" }, or an object naming an environment variable that holds a bearer token for that registry, e.g. { \"npm\": { \"url\": \"https://registry.mycompany.com\", \"tokenEnvVar\": \"COMPANY_NPM_TOKEN\" } } — Orizzonte reads the token from that variable at request time and never stores it. Ignored in untrusted workspaces.",
+          "description": "Override registry base URLs per ecosystem. A value can be a bare URL, e.g. { \"npm\": \"https://registry.mycompany.com\" }, or an object naming an environment variable that holds a bearer token for that registry, e.g. { \"npm\": { \"url\": \"https://registry.mycompany.com\", \"tokenEnvVar\": \"COMPANY_NPM_TOKEN\" } } — Orizzonte reads the token from that variable at request time and never stores it. The token is only sent when the entry is in your User settings, never from a workspace's settings.json. For maven and gradle, the URL is a Maven repository base (e.g. https://nexus.example.com/repository/maven-public), read through its maven-metadata.xml files; a Solr search endpoint is still accepted. Ignored in untrusted workspaces.",
           "additionalProperties": {
             "oneOf": [
               {
@@ -248,7 +253,7 @@
         "orizzonte.contactEmail": {
           "type": "string",
           "default": "",
-          "description": "Optional contact email included in the User-Agent sent to registries. Packagist requests one so they can reach you about unusual traffic."
+          "description": "Optional contact email included in the User-Agent sent to Packagist, which asks for one so it can reach you about unusual traffic. No other host receives it."
         },
         "orizzonte.licenseAllowList": {
           "type": "array",
@@ -282,45 +287,45 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "pretest:integration": "pnpm run build && tsc -p tsconfig.integration.json",
+    "pretest:integration": "node -e \"require('node:fs').rmSync('out', { recursive: true, force: true })\" && pnpm run build && tsc -p tsconfig.integration.json",
     "test:integration": "vscode-test",
     "test:all": "pnpm run test && pnpm run test:integration",
     "package": "vsce package --no-dependencies",
     "publish:ovsx": "ovsx publish *.vsix"
   },
   "dependencies": {
-    "fast-xml-parser": "^5.11.1",
+    "fast-xml-parser": "^5.11.2",
     "jsonc-parser": "^3.3.1",
     "semver": "^7.8.5",
-    "smol-toml": "^1.9.0",
+    "smol-toml": "^1.9.1",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
-    "@tanstack/react-virtual": "^3.14.13",
+    "@biomejs/biome": "^2.5.15",
+    "@tanstack/react-virtual": "^3.14.19",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
-    "@testing-library/user-event": "^14.6.7",
+    "@testing-library/user-event": "^14.6.8",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/semver": "^7.8.0",
     "@types/vscode": "~1.107.0",
-    "@vitejs/plugin-react": "^6.1.1",
-    "@vitest/coverage-v8": "^5.0.2",
+    "@vitejs/plugin-react": "^6.1.2",
+    "@vitest/coverage-v8": "^5.0.4",
     "@vscode/codicons": "0.0.46-24",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.9.2",
-    "concurrently": "^10.0.5",
+    "concurrently": "^10.0.6",
     "esbuild": "^0.28.2",
-    "jsdom": "^30.1.1",
+    "jsdom": "^30.1.2",
     "ovsx": "^1.2.0",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.1",
-    "vitest": "^5.0.2"
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4"
   }
 }

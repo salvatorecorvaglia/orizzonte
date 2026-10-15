@@ -6,7 +6,12 @@
  * understanding of what a key means.
  */
 
-import { addEdges, addVersion, type LockfileReader } from './types.js';
+import {
+  addEdges,
+  addResolved,
+  addVersion,
+  type LockfileReader,
+} from './types.js';
 
 /** The synthetic node standing for the project itself. */
 export const NPM_ROOT = '__root__';
@@ -16,6 +21,8 @@ interface NpmLock {
     string,
     { version?: string; dependencies?: Record<string, string> }
   >;
+  /** lockfileVersion 1's only map; v2 keeps it for old npm clients. */
+  dependencies?: Record<string, { version?: string }>;
 }
 
 /**
@@ -79,5 +86,58 @@ export const npmLockfile: LockfileReader = {
       addVersion(versions, name, entry.version);
     }
     return versions;
+  },
+
+  /**
+   * An install path names who owns the copy: `node_modules/x` is the root's,
+   * `packages/web/node_modules/x` is the `packages/web` member's own (npm puts
+   * one there when the member needs a version the root's hoisted copy does
+   * not satisfy), and `node_modules/a/node_modules/x` is `a`'s private copy.
+   *
+   * A member resolves its own copy first and the hoisted one otherwise — the
+   * same lookup Node does. Answering every member with the hoisted copy
+   * reported the wrong version for exactly the package that differed.
+   */
+  resolved(text) {
+    const lock = parse(text);
+    if (!lock) return undefined;
+
+    const root = new Map<string, string>();
+    const members = new Map<string, Map<string, string>>();
+    const nested: Array<[string, string]> = [];
+
+    for (const [key, entry] of Object.entries(lock.packages ?? {})) {
+      if (!entry.version) continue;
+      const marker = key.lastIndexOf('node_modules/');
+      if (marker < 0) continue; // the root, or a workspace member's own entry
+      const name = key.slice(marker + 'node_modules/'.length);
+      const owner = key.slice(0, marker).replace(/\/$/, '');
+
+      if (owner === '') root.set(name, entry.version);
+      else if (!owner.includes('node_modules')) {
+        const map = members.get(owner) ?? new Map<string, string>();
+        map.set(name, entry.version);
+        members.set(owner, map);
+      } else nested.push([name, entry.version]);
+    }
+
+    const all = new Map<string, string[]>();
+    for (const [name, version] of root) addResolved(all, name, version);
+    for (const map of members.values()) {
+      for (const [name, version] of map) addResolved(all, name, version);
+    }
+    for (const [name, version] of nested) addResolved(all, name, version);
+    for (const [name, entry] of Object.entries(lock.dependencies ?? {})) {
+      if (entry.version) addResolved(all, name, entry.version);
+    }
+
+    return {
+      all,
+      importer: (importer) => {
+        if (importer === '') return root;
+        const own = members.get(importer);
+        return own ? new Map([...root, ...own]) : root;
+      },
+    };
   },
 };

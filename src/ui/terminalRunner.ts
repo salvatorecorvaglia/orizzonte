@@ -27,12 +27,30 @@ export class TerminalRunner implements vscode.Disposable {
   /** The directory the current terminal was opened in, so it can be reused. */
   private terminalCwd: string | undefined;
 
+  /**
+   * Whether the current terminal's last command is known to have finished.
+   *
+   * Without shell integration a command is typed into the terminal and the
+   * runner moves on with no idea when it ends. Disposing that terminal to open
+   * one in another directory then killed an install still in progress — which
+   * a bulk action across two projects did routinely.
+   */
+  private lastCommandSettled = true;
+
+  /**
+   * Terminals replaced while a command might still be running in them. Left
+   * open for the user; closed only when the runner itself goes away.
+   */
+  private readonly retired = new Set<vscode.Terminal>();
+
   constructor() {
     this.disposables.push(
       vscode.window.onDidCloseTerminal((closed) => {
         if (closed === this.terminal) {
           this.terminal = undefined;
+          this.lastCommandSettled = true;
         }
+        this.retired.delete(closed);
       }),
     );
   }
@@ -74,6 +92,7 @@ export class TerminalRunner implements vscode.Disposable {
         buildCommandLine(command.argv, detectShell(vscode.env.shell)),
         true,
       );
+      this.lastCommandSettled = false;
       return { exitCode: undefined };
     }
 
@@ -92,6 +111,7 @@ export class TerminalRunner implements vscode.Disposable {
         if (event.execution !== execution) return;
         listener.dispose();
         clearTimeout(timeout);
+        this.lastCommandSettled = true;
         resolve({ exitCode: event.exitCode });
       });
 
@@ -100,6 +120,7 @@ export class TerminalRunner implements vscode.Disposable {
       const timeout = setTimeout(
         () => {
           listener.dispose();
+          this.lastCommandSettled = false;
           resolve({ exitCode: undefined });
         },
         10 * 60 * 1000,
@@ -113,7 +134,13 @@ export class TerminalRunner implements vscode.Disposable {
     if (this.terminal && this.terminalCwd === cwd) {
       return this.terminal;
     }
-    this.terminal?.dispose();
+    if (this.terminal) {
+      // Only a terminal known to be idle is closed. One whose command may
+      // still be running is left where it is, next to the new one.
+      if (this.lastCommandSettled) this.terminal.dispose();
+      else this.retired.add(this.terminal);
+    }
+    this.lastCommandSettled = true;
     this.terminalCwd = cwd;
     this.terminal = vscode.window.createTerminal({
       name: TERMINAL_NAME,
@@ -153,5 +180,7 @@ export class TerminalRunner implements vscode.Disposable {
       disposable.dispose();
     }
     this.terminal?.dispose();
+    for (const terminal of this.retired) terminal.dispose();
+    this.retired.clear();
   }
 }

@@ -228,6 +228,19 @@ export function constraintToApproxVersion(
 }
 
 /**
+ * The part of a declared constraint a registry can evaluate.
+ *
+ * An npm alias (`npm:string-width@^4.2.0`) names the real package and then its
+ * range; only the range means anything to `maxSatisfying`. Everything else is
+ * returned unchanged.
+ */
+export function registryConstraint(declared: string): string {
+  const alias = /^npm:(?:@[^@/]+\/)?[^@]+@(.*)$/.exec(declared.trim());
+  if (alias) return alias[1];
+  return declared.startsWith('npm:') ? '*' : declared;
+}
+
+/**
  * Carries a simple range operator from a declared constraint onto a new
  * concrete version, so updating `^1.2.3` to `1.4.0` yields `^1.4.0` rather
  * than silently pinning `1.4.0`.

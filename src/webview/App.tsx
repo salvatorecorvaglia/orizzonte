@@ -14,13 +14,15 @@ import type {
   DepScope,
   Ecosystem,
   LicenseSummary,
+  ManifestSummary,
+  PackageMeta,
   ProjectDependencyDiff,
   ProjectDuplicateVersions,
   ProjectGroup,
   ScanSummary,
   SearchResult,
 } from '../core/types.js';
-import { ALL_SCOPES, hasUpdate } from '../core/vocabulary.js';
+import { ALL_SCOPES, hasUpdate, isUpdatable } from '../core/vocabulary.js';
 import { DependencyDiffPanel } from './DependencyDiffPanel.js';
 import { DepTable, type SortState } from './DepTable.js';
 import { DetailDrawer } from './DetailDrawer.js';
@@ -95,6 +97,20 @@ function initialFilters(scopes?: DepScope[]): Filters {
   return { ...defaultFilters(scopes), onlyOutdated: true };
 }
 
+/** The row a key names, if the given groups hold it. */
+function findRow(
+  groups: ProjectGroup[],
+  depKey: string,
+): Dependency | undefined {
+  for (const group of groups) {
+    const dep = group.dependencies.find(
+      (candidate) => candidate.key === depKey,
+    );
+    if (dep) return dep;
+  }
+  return undefined;
+}
+
 /** Whether anything is currently narrowing the list — drives the empty state. */
 function isFiltering(filters: Filters): boolean {
   return (
@@ -110,6 +126,7 @@ export function App() {
   const persisted = loadState<PersistedState>();
 
   const [groups, setGroups] = useState<ProjectGroup[]>([]);
+  const [manifests, setManifests] = useState<ManifestSummary[]>([]);
   const [summary, setSummary] = useState<ScanSummary>(EMPTY_SUMMARY);
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState<string | undefined>();
@@ -126,6 +143,13 @@ export function App() {
   const error = errors[errors.length - 1];
   /** True once the host has sent at least one scan result. */
   const [loaded, setLoaded] = useState(false);
+  /**
+   * Bumped on every `state`. The drawer keys its requests on it, because a
+   * rescan clears the "why" trees and release notes below — and the drawer
+   * used to ask only when the selected row changed, so an open one sat on
+   * "Resolving…" after every file-watcher refresh.
+   */
+  const [scanGeneration, setScanGeneration] = useState(0);
 
   const [sort, setSort] = useState<SortState>(
     persisted?.sort ?? { key: 'status', direction: 'asc' },
@@ -150,6 +174,10 @@ export function App() {
    */
   const [changelogByKey, setChangelogByKey] = useState<
     Record<string, ChangelogEntry[] | undefined>
+  >({});
+  /** depKey -> why its release notes could not be fetched. */
+  const [changelogErrorByKey, setChangelogErrorByKey] = useState<
+    Record<string, string>
   >({});
 
   /*
@@ -217,21 +245,17 @@ export function App() {
   const [activeRequestId, setActiveRequestId] = useState<string | undefined>();
 
   /**
-   * depKey -> a counter bumped each time that row's `meta` is merged.
+   * Details fetched for a row after the scan landed, by dependency key.
    *
-   * `DepRow` is memoized on shallow prop equality, and `dep` keeps its
-   * identity across a merge (mutated in place, not replaced) so that sorted
-   * order does not shift while the user is looking at it. Without some prop
-   * that actually changes value, memo sees the same `dep` reference and skips
-   * the re-render — this counter is that prop.
-   *
-   * State rather than a ref holding a mutable `Map`. The ref's identity never
-   * changed, so the prop React saw was identical on every render and the row
-   * only updated because a second piece of state was bumped alongside it
-   * purely to force one. Storing the counters where React can see them makes
-   * the re-render follow from the data, and removes the tick entirely.
+   * An overlay rather than a change to `groups`. Rebuilding the groups would
+   * re-sort the table, so a row that gains a size or a deprecation notice
+   * while the table is sorted by Size or Status would jump out from under the
+   * pointer of the user who just clicked it. This used to be avoided by
+   * mutating the row in place and bumping a counter so React noticed; keeping
+   * the details beside the rows gets the same stable order with nothing
+   * mutated.
    */
-  const [metaVersions, setMetaVersions] = useState<Record<string, number>>({});
+  const [metaByKey, setMetaByKey] = useState<Record<string, PackageMeta>>({});
   const groupsRef = useRef<ProjectGroup[]>([]);
   const filterRef = useRef<HTMLInputElement>(null);
 
@@ -281,7 +305,12 @@ export function App() {
     const targets: Array<{ depKey: string; toVersion: string }> = [];
     for (const group of groups) {
       for (const dep of group.dependencies) {
-        if (selectedDepKeys.has(dep.key) && hasUpdate(dep) && dep.latest) {
+        if (
+          selectedDepKeys.has(dep.key) &&
+          hasUpdate(dep) &&
+          isUpdatable(dep) &&
+          dep.latest
+        ) {
           targets.push({ depKey: dep.key, toVersion: dep.latest });
         }
       }
@@ -326,6 +355,8 @@ export function App() {
         case 'state': {
           groupsRef.current = message.groups;
           setGroups(message.groups);
+          setManifests(message.manifests ?? []);
+          setScanGeneration((current) => current + 1);
           setSummary(message.summary);
           setLoaded(true);
           /*
@@ -357,42 +388,29 @@ export function App() {
            */
           setWhyByKey({});
           setChangelogByKey({});
+          setChangelogErrorByKey({});
+          // The host carries fetched details over to the new rows itself.
+          setMetaByKey({});
           break;
         }
 
         case 'depDetails': {
+          // Into the overlay, not the rows — see `metaByKey`.
+          const dep = findRow(groupsRef.current, message.depKey);
+          if (!dep) break;
+          // Preserve any deprecation notice the version lookup already found.
+          const meta: PackageMeta = {
+            ...message.meta,
+            deprecated: message.meta.deprecated ?? dep.meta?.deprecated,
+          };
+          setMetaByKey((current) => ({ ...current, [message.depKey]: meta }));
           /*
-           * Merged in place instead of rebuilding `groups`.
-           *
-           * A new `groups` array would recompute the sort, so a row that gains
-           * a size or a deprecation notice while the table is sorted by Size or
-           * Status would jump out from under the pointer of the user who just
-           * clicked it. Mutating the row and forcing a render keeps the order
-           * the user is looking at.
+           * Only once the repository is known, and only for a package that
+           * actually has an update to preview — a package already current
+           * has no "between" for the changelog to describe.
            */
-          for (const group of groupsRef.current) {
-            const dep = group.dependencies.find(
-              (candidate) => candidate.key === message.depKey,
-            );
-            if (!dep) continue;
-            // Preserve any deprecation notice the version lookup already found.
-            dep.meta = {
-              ...message.meta,
-              deprecated: message.meta.deprecated ?? dep.meta?.deprecated,
-            };
-            setMetaVersions((current) => ({
-              ...current,
-              [message.depKey]: (current[message.depKey] ?? 0) + 1,
-            }));
-            /*
-             * Only once the repository is known, and only for a package that
-             * actually has an update to preview — a package already current
-             * has no "between" for the changelog to describe.
-             */
-            if (dep.meta.repository && hasUpdate(dep)) {
-              post({ type: 'requestChangelog', depKey: dep.key });
-            }
-            break;
+          if (meta.repository && hasUpdate(dep)) {
+            post({ type: 'requestChangelog', depKey: dep.key });
           }
           break;
         }
@@ -448,6 +466,13 @@ export function App() {
             ...current,
             [message.depKey]: message.entries,
           }));
+          setChangelogErrorByKey((current) => {
+            if (!message.error && !(message.depKey in current)) return current;
+            const next = { ...current };
+            if (message.error) next[message.depKey] = message.error;
+            else delete next[message.depKey];
+            return next;
+          });
           break;
 
         case 'dependencyDiff':
@@ -557,16 +582,40 @@ export function App() {
       .filter((group) => group.dependencies.length > 0);
   }, [groups, filters]);
 
+  /*
+   * Everything a package can be installed into: the projects with rows, plus
+   * the manifests that declare nothing yet. Without the second half a new
+   * project could never receive its first dependency from the panel.
+   */
+  const installTargets = useMemo<ManifestSummary[]>(() => {
+    const targets: ManifestSummary[] = groups.map((group) => ({
+      manifestPath: group.manifestPath,
+      label: group.label,
+      ecosystem: group.ecosystem,
+    }));
+    const known = new Set(targets.map((target) => target.manifestPath));
+    for (const manifest of manifests) {
+      if (!known.has(manifest.manifestPath)) targets.push(manifest);
+    }
+    return targets;
+  }, [groups, manifests]);
+
+  const shownCount = useMemo(
+    () =>
+      filteredGroups.reduce(
+        (count, group) => count + group.dependencies.length,
+        0,
+      ),
+    [filteredGroups],
+  );
+
+  /** The drawer's row, with any details fetched since the scan laid over it. */
   const selected = useMemo(() => {
     if (!selectedKey) return undefined;
-    for (const group of groups) {
-      const dep = group.dependencies.find(
-        (candidate) => candidate.key === selectedKey,
-      );
-      if (dep) return dep;
-    }
-    return undefined;
-  }, [groups, selectedKey]);
+    const dep = findRow(groups, selectedKey);
+    const meta = metaByKey[selectedKey];
+    return dep && meta ? { ...dep, meta } : dep;
+  }, [groups, selectedKey, metaByKey]);
 
   const handleSearch = useCallback(
     (query: string, ecosystem: Ecosystem | 'all') => {
@@ -707,11 +756,12 @@ export function App() {
   const searchPanel =
     activePanel === 'search' ? (
       <SearchInstall
-        groups={groups}
+        groups={installTargets}
         results={searchResults}
         error={searchError}
         partialFailure={searchPartial}
         searching={searching}
+        busy={busy}
         onSearch={handleSearch}
         onInstall={(name, version, scope, manifestPath) =>
           post({ type: 'install', name, version, scope, manifestPath })
@@ -751,6 +801,16 @@ export function App() {
           >
             <Icon name="close" />
           </button>
+          {/* One click for the lot after a bulk action went badly. */}
+          {errors.length > 1 && (
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => setErrors([])}
+            >
+              Dismiss all
+            </button>
+          )}
         </div>
       )}
       {notice && (
@@ -778,7 +838,7 @@ export function App() {
    * branch, and without a button here the feature was reachable only from the
    * command palette.
    */
-  if (groups.length === 0 && loaded && !busy) {
+  if (installTargets.length === 0 && loaded && !busy) {
     return (
       // Banners above the search panel, as in the main branch below. They used
       // to swap places between the two, so an error moved down the screen when
@@ -820,6 +880,7 @@ export function App() {
     <div className="app">
       <Toolbar
         groups={groups}
+        shownCount={shownCount}
         filterRef={filterRef}
         filters={filters}
         onFiltersChange={setFilters}
@@ -853,7 +914,7 @@ export function App() {
         <div className="app__main">
           <DepTable
             groups={filteredGroups}
-            metaVersions={metaVersions}
+            metaByKey={metaByKey}
             sort={sort}
             onSortChange={setSort}
             selectedKey={selectedKey}
@@ -872,7 +933,10 @@ export function App() {
             onScrollHandled={handleScrollHandled}
             busy={busy}
             loading={!loaded || (busy && groups.length === 0)}
-            filtering={isFiltering(filters)}
+            // With no rows at all, "no matches for your filters" would be
+            // wrong: there is nothing to filter, only manifests that declare
+            // nothing yet.
+            filtering={groups.length > 0 && isFiltering(filters)}
             onClearFilters={() => setFilters(defaultFilters())}
           />
         </div>
@@ -881,8 +945,10 @@ export function App() {
           <DetailDrawer
             dep={selected}
             why={whyByKey[selected.key]}
+            scanGeneration={scanGeneration}
             changelogEntries={changelogByKey[selected.key]}
             changelogLoaded={selected.key in changelogByKey}
+            changelogError={changelogErrorByKey[selected.key]}
             reveal={revealSection}
             busy={busy}
             onClose={() => setSelectedKey(undefined)}

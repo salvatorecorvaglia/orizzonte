@@ -255,3 +255,31 @@ describe('result states', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/1 package/i);
   });
 });
+
+describe('while busy', () => {
+  // Install and Remove are writes; the table's buttons already waited for a
+  // running scan or command, and these did not.
+  it('disables Install and Remove', () => {
+    renderPanel({
+      busy: true,
+      results: [
+        reactResult,
+        {
+          ...reactResult,
+          name: 'lodash',
+          installedIn: [
+            {
+              manifestPath: '/p/package.json',
+              projectLabel: 'web',
+              declared: '^4.17.0',
+              scope: 'prod',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: 'Install' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeDisabled();
+  });
+});

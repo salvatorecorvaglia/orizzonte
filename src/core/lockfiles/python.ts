@@ -10,9 +10,9 @@
  * declaring `Jinja2` meet a lockfile recording `jinja2`.
  */
 
-import { normalizeName } from '../../providers/python/index.js';
+import { normalizeName } from '../pep503.js';
 import { splitTomlPackageBlocks, tomlField } from './toml.js';
-import { addVersion, type LockfileReader } from './types.js';
+import { addResolved, addVersion, type LockfileReader } from './types.js';
 
 function reader(file: string): LockfileReader {
   return {
@@ -66,6 +66,16 @@ function reader(file: string): LockfileReader {
         }
       }
       return versions.size > 0 ? versions : undefined;
+    },
+
+    resolved(text) {
+      const all = new Map<string, string[]>();
+      for (const block of splitTomlPackageBlocks(text)) {
+        const name = tomlField(block, 'name');
+        const version = tomlField(block, 'version');
+        if (name && version) addResolved(all, normalizeName(name), version);
+      }
+      return all.size > 0 ? { all } : undefined;
     },
   };
 }

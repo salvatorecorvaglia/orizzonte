@@ -198,14 +198,16 @@ packages:
     const cwd = '/p';
     const ecosystem = 'node' as const;
 
-    // `yarn update` does not exist in either line: v1 is `upgrade`, Berry is `up`.
+    // `yarn update` does not exist in either line: v1 is `upgrade`. Berry's
+    // `up` needs a pattern and jumps to latest; `up -R '*'` re-resolves every
+    // range without touching the manifest, which is the within-ranges form.
     expect(
       provider.updateAllCommand({ id: 'yarn', ecosystem, cwd })?.argv,
     ).toEqual(['yarn', 'upgrade']);
     expect(
       provider.updateAllCommand({ id: 'yarn', ecosystem, cwd, yarnBerry: true })
         ?.argv,
-    ).toEqual(['yarn', 'up']);
+    ).toEqual(['yarn', 'up', '-R', '*']);
 
     for (const id of ['npm', 'pnpm', 'bun'] as const) {
       expect(provider.updateAllCommand({ id, ecosystem, cwd })?.argv).toEqual([

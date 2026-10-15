@@ -83,11 +83,25 @@ export function changelogUrlFor(
   if (!repository) return undefined;
   try {
     const url = new URL(repository);
+    /*
+     * From the project's root, not from whatever page the registry recorded.
+     * Monorepo packages publish `…/tree/main/packages/x` (and `#readme`
+     * fragments are common), which used to become
+     * `…/tree/main/packages/x/releases` — a page that does not exist.
+     */
     if (url.hostname === 'github.com') {
-      return `${repository}/releases`;
+      const [owner, repo] = url.pathname.split('/').filter(Boolean);
+      if (!owner || !repo) return undefined;
+      return `https://github.com/${owner}/${repo}/releases`;
     }
     if (url.hostname === 'gitlab.com') {
-      return `${repository}/-/releases`;
+      // GitLab projects nest in groups, so the project is everything before
+      // the first route marker rather than a fixed two segments.
+      const project = url.pathname
+        .split(/\/(?:-|tree|blob)\//)[0]
+        .replace(/\/+$/, '');
+      if (project.split('/').filter(Boolean).length < 2) return undefined;
+      return `https://gitlab.com${project}/-/releases`;
     }
     return undefined;
   } catch {

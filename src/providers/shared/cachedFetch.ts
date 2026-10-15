@@ -11,7 +11,12 @@
  */
 
 import { TTL } from '../../core/cache.js';
-import type { PackageMeta } from '../../core/types.js';
+import type { Ecosystem, PackageMeta } from '../../core/types.js';
+import {
+  compareVersions,
+  isPrerelease,
+  maxVersion,
+} from '../../core/versions/index.js';
 import type { ProviderContext, VersionInfo } from '../provider.js';
 import { mapWithConcurrency } from './concurrency.js';
 
@@ -23,6 +28,8 @@ export async function fetchVersionsWithCache(
   fetchOne: (name: string) => Promise<VersionInfo | undefined>,
   /** Names are manifest-sourced and not ours to trust; skipped silently. */
   isValidName?: (name: string) => boolean,
+  /** When given, the cached copy is compacted — see `compactVersionInfo`. */
+  ecosystem?: Ecosystem,
 ): Promise<Map<string, VersionInfo>> {
   const result = new Map<string, VersionInfo>();
 
@@ -40,7 +47,11 @@ export async function fetchVersionsWithCache(
       const info = await fetchOne(name);
       if (info === undefined) return;
       result.set(name, info);
-      await ctx.cache.set(key, info, TTL.version);
+      await ctx.cache.set(
+        key,
+        ecosystem ? compactVersionInfo(ecosystem, info) : info,
+        TTL.version,
+      );
     } catch {
       const stale = ctx.cache.getStale<VersionInfo>(key);
       if (stale) result.set(name, stale);
@@ -48,6 +59,41 @@ export async function fetchVersionsWithCache(
   });
 
   return result;
+}
+
+/**
+ * A version list trimmed for storage: every stable release, plus only the
+ * prereleases newer than the latest stable one.
+ *
+ * The cache persists to `globalState`, which VS Code loads synchronously at
+ * every extension-host start, and a few packages dominate it: `next` and
+ * `typescript` publish a canary or a nightly almost daily, so their lists run
+ * to thousands of entries — nearly all of them prereleases of versions that
+ * have long since shipped. Nothing here reads those: `latest` and the update
+ * badge are stable releases, and a range matches a prerelease only of the
+ * version it names. The scan that fetched the list still sees all of it; only
+ * the copy kept for later is trimmed.
+ */
+export function compactVersionInfo(
+  ecosystem: Ecosystem,
+  info: VersionInfo,
+): VersionInfo {
+  const stable = info.versions.filter(
+    (version) => !isPrerelease(ecosystem, version),
+  );
+  if (stable.length === 0 || stable.length === info.versions.length) {
+    return info;
+  }
+  const newestStable = maxVersion(ecosystem, stable);
+  if (newestStable === undefined) return info;
+  return {
+    ...info,
+    versions: info.versions.filter(
+      (version) =>
+        !isPrerelease(ecosystem, version) ||
+        compareVersions(ecosystem, version, newestStable) > 0,
+    ),
+  };
 }
 
 /**

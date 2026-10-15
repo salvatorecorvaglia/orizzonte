@@ -75,7 +75,7 @@ This starts concurrent watch processes for both the Extension Host (`esbuild`) a
 | Script | Command | Description |
 | :--- | :--- | :--- |
 | `build` | `pnpm run build` | Builds both the extension host (`build:host`) and webview UI (`build:webview`). |
-| `build:host` | `pnpm run build:host` | Compiles extension host TypeScript source into `dist/extension.js` using `esbuild`, and copies the codicon font and stylesheet into `dist/codicons` for the Activity Bar view. |
+| `build:host` | `pnpm run build:host` | Compiles extension host TypeScript source into `dist/extension.js` using `esbuild`. |
 | `build:webview` | `pnpm run build:webview` | Bundles webview UI application into `dist/webview` using `vite`. |
 | `watch` | `pnpm run watch` | Watches for source changes and incrementally rebuilds host & webview assets. |
 | `typecheck` | `pnpm run typecheck` | Runs `tsc --noEmit` across both extension host and webview TypeScript configurations. |

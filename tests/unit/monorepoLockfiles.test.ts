@@ -212,3 +212,173 @@ packages:
     ]);
   });
 });
+
+/**
+ * Members that resolve *different* versions of one package.
+ *
+ * The root lockfile records each member's resolution separately, and the old
+ * per-provider parsers merged them into one map — so every member was told the
+ * version whichever sibling happened to be listed first resolved, and its
+ * update badge and advisories were computed against someone else's version.
+ */
+describe('per-member resolution', () => {
+  it('answers each pnpm importer with its own version', async () => {
+    const ctx = makeContext(
+      {
+        '/ws/pnpm-lock.yaml': `
+lockfileVersion: '9.0'
+importers:
+  .:
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.4.5
+  packages/legacy:
+    dependencies:
+      react:
+        specifier: ^17.0.0
+        version: 17.0.2
+      utils:
+        specifier: workspace:*
+        version: link:../utils
+  packages/web:
+    dependencies:
+      react:
+        specifier: ^18.0.0
+        version: 18.3.1(react-dom@18.3.1)
+packages:
+  react@17.0.2: {}
+  react@18.3.1: {}
+  typescript@5.4.5: {}
+`,
+      },
+      ROOT,
+    );
+
+    const legacy = await nodeProvider.readLockfile('/ws/packages/legacy', ctx);
+    const web = await nodeProvider.readLockfile('/ws/packages/web', ctx);
+
+    expect(legacy.get('react')).toBe('17.0.2');
+    expect(web.get('react')).toBe('18.3.1');
+    // A workspace link is not a version.
+    expect(legacy.get('utils')).toBeUndefined();
+  });
+
+  it("prefers a member's own node_modules copy over the hoisted one in package-lock.json", async () => {
+    const ctx = makeContext(
+      {
+        '/ws/package-lock.json': JSON.stringify({
+          lockfileVersion: 3,
+          packages: {
+            '': { name: 'root', workspaces: ['packages/*'] },
+            'packages/legacy': { name: 'legacy' },
+            'packages/web': { name: 'web' },
+            'node_modules/react': { version: '18.3.1' },
+            'packages/legacy/node_modules/react': { version: '17.0.2' },
+            'node_modules/some-lib/node_modules/react': { version: '16.14.0' },
+          },
+        }),
+      },
+      ROOT,
+    );
+
+    expect(
+      (await nodeProvider.readLockfile('/ws/packages/legacy', ctx)).get(
+        'react',
+      ),
+    ).toBe('17.0.2');
+    expect(
+      (await nodeProvider.readLockfile('/ws/packages/web', ctx)).get('react'),
+    ).toBe('18.3.1');
+    expect((await nodeProvider.readLockfile(ROOT, ctx)).get('react')).toBe(
+      '18.3.1',
+    );
+  });
+
+  it('matches a yarn.lock block by the range the manifest declares', async () => {
+    const yarnLock = `# yarn lockfile v1
+
+lodash@^3.10.0:
+  version "3.10.1"
+
+lodash@^4.17.0, lodash@^4.17.21:
+  version "4.17.21"
+`;
+    const ctx = makeContext({ '/p/yarn.lock': yarnLock });
+
+    const resolved = await nodeProvider.readLockfile('/p', ctx, [
+      {
+        key: 'k',
+        name: 'lodash',
+        ecosystem: 'node',
+        scope: 'prod',
+        declared: '^4.17.21',
+        updateKind: 'unknown',
+        vulnerabilities: [],
+        manifestPath: '/p/package.json',
+        projectLabel: 'p',
+      },
+    ]);
+
+    expect(resolved.get('lodash')).toBe('4.17.21');
+  });
+
+  it('matches a Yarn Berry npm: descriptor to the bare range', async () => {
+    const yarnLock = `__metadata:
+  version: 8
+
+"lodash@npm:^3.10.0":
+  version: 3.10.1
+
+"lodash@npm:^4.17.21":
+  version: 4.17.21
+`;
+    const ctx = makeContext({ '/p/yarn.lock': yarnLock });
+
+    const resolved = await nodeProvider.readLockfile('/p', ctx, [
+      {
+        key: 'k',
+        name: 'lodash',
+        ecosystem: 'node',
+        scope: 'prod',
+        declared: '^4.17.21',
+        updateKind: 'unknown',
+        vulnerabilities: [],
+        manifestPath: '/p/package.json',
+        projectLabel: 'p',
+      },
+    ]);
+
+    expect(resolved.get('lodash')).toBe('4.17.21');
+  });
+
+  it('picks the Cargo.lock copy the declared requirement admits', async () => {
+    const ctx = makeContext({
+      '/p/Cargo.lock': `
+[[package]]
+name = "rand"
+version = "0.7.3"
+
+[[package]]
+name = "rand"
+version = "0.8.5"
+`,
+    });
+
+    const resolved = await cargoProvider.readLockfile('/p', ctx, [
+      {
+        key: 'k',
+        name: 'rand',
+        ecosystem: 'cargo',
+        scope: 'prod',
+        declared: '0.8',
+        updateKind: 'unknown',
+        vulnerabilities: [],
+        manifestPath: '/p/Cargo.toml',
+        projectLabel: 'p',
+      },
+    ]);
+
+    expect(resolved.get('rand')).toBe('0.8.5');
+  });
+});

@@ -10,16 +10,42 @@
  */
 
 import { parse as parseYaml } from 'yaml';
-import { addEdges, addVersion, type LockfileReader } from './types.js';
+import {
+  addEdges,
+  addResolved,
+  addVersion,
+  type LockfileReader,
+} from './types.js';
 
 interface PnpmLockEntry {
   dependencies?: Record<string, unknown>;
   optionalDependencies?: Record<string, unknown>;
 }
 
+/** A direct dependency: `{ specifier, version }` since v6, a bare string before. */
+type PnpmImporterDep = string | { version?: string };
+
+interface PnpmImporter {
+  dependencies?: Record<string, PnpmImporterDep>;
+  devDependencies?: Record<string, PnpmImporterDep>;
+  optionalDependencies?: Record<string, PnpmImporterDep>;
+}
+
 interface PnpmLock {
+  importers?: Record<string, PnpmImporter>;
   packages?: Record<string, PnpmLockEntry>;
   snapshots?: Record<string, PnpmLockEntry>;
+}
+
+/**
+ * The version an importer entry resolved to, or undefined for one that is not
+ * a registry version at all (`link:../utils` for a workspace sibling).
+ */
+function importerVersion(dep: PnpmImporterDep | undefined): string | undefined {
+  const raw = typeof dep === 'string' ? dep : dep?.version;
+  if (!raw || /^(?:link|file|workspace):/.test(raw)) return undefined;
+  const paren = raw.indexOf('(');
+  return paren >= 0 ? raw.slice(0, paren) : raw;
 }
 
 /**
@@ -90,5 +116,46 @@ export const pnpmLockfile: LockfileReader = {
       }
     }
     return versions.size > 0 ? versions : undefined;
+  },
+
+  /**
+   * `importers:` is keyed by each member's path — `.` for the root — and lists
+   * exactly what that member resolved. Merging every importer into one map
+   * let the first member listed decide the version for all of them.
+   */
+  resolved(text) {
+    const doc = parse(text);
+    if (!doc) return undefined;
+
+    const all = new Map<string, string[]>();
+    const importers = new Map<string, Map<string, string>>();
+
+    for (const [path, importer] of Object.entries(doc.importers ?? {})) {
+      const map = new Map<string, string>();
+      for (const bucket of [
+        importer?.dependencies,
+        importer?.devDependencies,
+        importer?.optionalDependencies,
+      ]) {
+        for (const [name, dep] of Object.entries(bucket ?? {})) {
+          const version = importerVersion(dep);
+          if (version) map.set(name, version);
+        }
+      }
+      importers.set(path, map);
+      for (const [name, version] of map) addResolved(all, name, version);
+    }
+
+    for (const section of [doc.packages, doc.snapshots]) {
+      for (const key of Object.keys(section ?? {})) {
+        const { name, version } = splitPnpmKey(key);
+        if (name && version) addResolved(all, name, version);
+      }
+    }
+
+    return {
+      all,
+      importer: (importer) => importers.get(importer === '' ? '.' : importer),
+    };
   },
 };

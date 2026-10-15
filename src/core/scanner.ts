@@ -20,6 +20,7 @@ import { auditDependencies } from './audit.js';
 import type {
   Dependency,
   Ecosystem,
+  ManifestSummary,
   ParsedManifest,
   ProjectGroup,
   ScanSummary,
@@ -30,7 +31,9 @@ import {
   constraintToApproxVersion,
   maxSatisfying,
   maxVersion,
+  registryConstraint,
 } from './versions/index.js';
+import { isRegistryPackage, registryNameOf } from './vocabulary.js';
 import { assignWorkspaces, readSidecarMembers } from './workspaces.js';
 
 export interface ScanResult {
@@ -45,6 +48,8 @@ export interface ScanResult {
    * really asking.
    */
   manifestPaths: string[];
+  /** The same manifests, labelled, for the install panel's target list. */
+  manifests: ManifestSummary[];
   summary: ScanSummary;
 }
 
@@ -171,14 +176,19 @@ export class Scanner {
     signal: AbortSignal,
     onPartial?: (result: ScanResult) => void,
   ): Promise<ScanResult> {
-    const { groups, manifestPaths } = await this.collectGroups(
+    const { groups, manifestPaths, manifests } = await this.collectGroups(
       signal,
       this.scanContext(),
     );
+    // The manifest walk stops early once aborted, so what it returned is only
+    // the part it reached. Handing that on — to `onPartial`, or as the result
+    // of an offline scan — would present a truncated workspace as the whole.
+    signal.throwIfAborted();
 
     const partial: ScanResult = {
       groups,
       manifestPaths,
+      manifests,
       summary: summarize(groups, false),
     };
     onPartial?.(partial);
@@ -188,6 +198,7 @@ export class Scanner {
     }
 
     let stale = false;
+    let auditIncomplete = false;
     try {
       // Only a total failure means "stale". One unreachable registry should
       // grey out its own ecosystem's rows, not relabel results that arrived
@@ -198,21 +209,32 @@ export class Scanner {
       // OSV, not from the registries, so a registry being down is no reason to
       // skip the security check.
       if (options.audit) {
-        await auditDependencies(groups, this.ctx, signal);
+        const outcome = await auditDependencies(groups, this.ctx, signal);
+        auditIncomplete = !outcome.complete;
       }
     } catch (error) {
       if (signal.aborted) throw error;
       stale = true;
     }
 
-    return { groups, manifestPaths, summary: summarize(groups, stale) };
+    const summary = summarize(groups, stale);
+    return {
+      groups,
+      manifestPaths,
+      manifests,
+      summary: auditIncomplete ? { ...summary, auditIncomplete } : summary,
+    };
   }
 
   /** Finds and parses every manifest in the workspace. */
   private async collectGroups(
     signal: AbortSignal,
     ctx: ProviderContext,
-  ): Promise<{ groups: ProjectGroup[]; manifestPaths: string[] }> {
+  ): Promise<{
+    groups: ProjectGroup[];
+    manifestPaths: string[];
+    manifests: ManifestSummary[];
+  }> {
     const excludes = [
       ...vscode.workspace
         .getConfiguration('orizzonte')
@@ -260,6 +282,7 @@ export class Scanner {
 
     const groups: ProjectGroup[] = [];
     const manifestPaths: string[] = [];
+    const manifests: ManifestSummary[] = [];
     // Collected alongside the groups so workspace membership can be resolved
     // once every manifest is known.
     const parsed: Array<{ manifest: ParsedManifest; members: string[] }> = [];
@@ -268,13 +291,21 @@ export class Scanner {
       if (!slot) continue;
       parsed.push({ manifest: slot.manifest, members: slot.members });
       manifestPaths.push(slot.manifest.path);
+      manifests.push({
+        manifestPath: slot.manifest.path,
+        label:
+          slot.group?.label ??
+          relativeLabel(slot.manifest.path, slot.manifest.name),
+        ecosystem: slot.manifest.ecosystem,
+      });
       if (slot.group) groups.push(slot.group);
     }
 
     this.applyWorkspaceInfo(groups, parsed);
 
     groups.sort((a, b) => a.label.localeCompare(b.label));
-    return { groups, manifestPaths };
+    manifests.sort((a, b) => a.label.localeCompare(b.label));
+    return { groups, manifestPaths, manifests };
   }
 
   /**
@@ -328,6 +359,7 @@ export class Scanner {
         const resolved = await provider.readLockfile(
           path.dirname(manifestPath),
           ctx,
+          manifest.dependencies,
         );
         if (resolved.size > 0) {
           // Providers normalise their lockfile keys to whatever their
@@ -337,10 +369,13 @@ export class Scanner {
           // pyproject.toml never matches `typing-extensions` in uv.lock.
           const normalize = provider.normalizeName ?? ((name: string) => name);
           for (const dep of manifest.dependencies) {
+            // Most lockfiles key by the name the manifest uses; Cargo's keys
+            // by the crate's real name, which a `package =` rename changes.
+            const name = provider.lockfileName?.(dep) ?? dep.name;
             dep.installed ??=
-              resolved.get(dep.name) ??
-              resolved.get(dep.name.toLowerCase()) ??
-              resolved.get(normalize(dep.name));
+              resolved.get(name) ??
+              resolved.get(name.toLowerCase()) ??
+              resolved.get(normalize(name));
           }
         }
       } catch {
@@ -353,6 +388,7 @@ export class Scanner {
     // guess, because the audit matches advisories against this value.
     for (const dep of manifest.dependencies) {
       if (dep.installed !== undefined) continue;
+      if (!isRegistryPackage(dep)) continue;
       const approximate = constraintToApproxVersion(dep.declared);
       if (approximate === undefined) continue;
       dep.installed = approximate;
@@ -474,6 +510,9 @@ export class Scanner {
     const byEcosystem = new Map<Ecosystem, Dependency[]>();
     for (const group of groups) {
       for (const dep of group.dependencies) {
+        // A workspace sibling, local path or git checkout shares a name with
+        // whatever the public registry holds under it, and nothing else.
+        if (!isRegistryPackage(dep)) continue;
         const existing = byEcosystem.get(dep.ecosystem);
         if (existing) existing.push(dep);
         else byEcosystem.set(dep.ecosystem, [dep]);
@@ -485,7 +524,9 @@ export class Scanner {
     const outcomes = await Promise.all(
       [...byEcosystem.entries()].map(async ([ecosystem, dependencies]) => {
         const provider = providerFor(ecosystem);
-        const names = [...new Set(dependencies.map((dep) => dep.name))];
+        const names = [
+          ...new Set(dependencies.map((dep) => registryNameOf(dep))),
+        ];
 
         let versions: Map<string, VersionInfo>;
         try {
@@ -512,7 +553,7 @@ export class Scanner {
     versions: Map<string, VersionInfo>,
   ): void {
     for (const dep of dependencies) {
-      const info = versions.get(dep.name);
+      const info = versions.get(registryNameOf(dep));
       if (!info || info.versions.length === 0) {
         dep.lookupFailed = true;
         dep.updateKind = 'unknown';
@@ -521,7 +562,11 @@ export class Scanner {
 
       dep.latest = info.latest ?? maxVersion(ecosystem, info.versions);
       dep.wanted =
-        maxSatisfying(ecosystem, info.versions, dep.declared) ?? dep.installed;
+        maxSatisfying(
+          ecosystem,
+          info.versions,
+          registryConstraint(dep.declared),
+        ) ?? dep.installed;
 
       if (info.deprecated || info.sizeBytes !== undefined) {
         dep.meta = {
@@ -543,7 +588,7 @@ export class Scanner {
   /** Fetches rich metadata for a single package, on demand from the drawer. */
   async fetchDetails(dep: Dependency, signal?: AbortSignal) {
     const provider = providerFor(dep.ecosystem);
-    return provider.fetchMetadata(dep.name, this.ctx, signal);
+    return provider.fetchMetadata(registryNameOf(dep), this.ctx, signal);
   }
 
   /**
@@ -625,7 +670,12 @@ function relativeLabel(manifestPath: string, manifestName: string): string {
   );
   if (!folder) return manifestName;
 
-  const relative = path.relative(folder.uri.fsPath, path.dirname(manifestPath));
+  // Always `/`-separated: a label is display text, and Windows' `\` made the
+  // same project read `packages\web` there and `packages/web` everywhere else.
+  const relative = path
+    .relative(folder.uri.fsPath, path.dirname(manifestPath))
+    .split(path.sep)
+    .join('/');
   const base = path.basename(manifestPath);
 
   // Several manifests can share a directory (pyproject.toml + requirements.txt),

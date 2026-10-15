@@ -82,6 +82,17 @@ export interface Command {
    * because every other package manager records what it did.
    */
   writesManifest?: boolean;
+  /**
+   * For a bulk update: whether it keeps every package within its declared
+   * range (`npm update`, `cargo update`) or moves each to its latest release,
+   * majors included (`mvn versions:use-latest-releases`).
+   *
+   * The confirmation dialog counts from this. It used to count every outdated
+   * package, majors included, in front of a command that would leave the
+   * majors exactly where they were — so the panel still showed them outdated
+   * afterwards, as if the update had failed.
+   */
+  reach?: 'ranges' | 'latest';
 }
 
 export interface EcosystemProvider {
@@ -130,10 +141,15 @@ export interface EcosystemProvider {
    *
    * Keys are in the ecosystem's canonical form; implement `normalizeName` when
    * that differs from what the manifest writes, or the two never meet.
+   *
+   * @param dependencies The manifest's dependencies, when known. Their declared
+   *   ranges pick the right copy when a lockfile resolves a package more than
+   *   once (two majors of one package in a yarn.lock or Cargo.lock).
    */
   readLockfile?(
     manifestDir: string,
     ctx: ProviderContext,
+    dependencies?: Dependency[],
   ): Promise<Map<string, string>>;
 
   /**
@@ -144,6 +160,13 @@ export interface EcosystemProvider {
    * differently from its manifest belongs here.
    */
   normalizeName?(name: string): string;
+
+  /**
+   * The key `readLockfile` stores this dependency under, when it is not the
+   * manifest's name for it. Cargo needs this: its lockfile records a crate by
+   * its real name, which a `package =` rename changes.
+   */
+  lockfileName?(dep: Dependency): string;
 
   /**
    * @param manifestText The manifest's contents, when the caller already has
@@ -199,12 +222,22 @@ export interface EcosystemProvider {
 
   uninstallCommand(toolchain: Toolchain, dep: Dependency): Command | null;
 
+  /**
+   * The ecosystem's own "update everything" command, or null when it has none
+   * — the host then updates each outdated package to its latest release in
+   * turn, which works wherever `updateCommand` or `editManifest` does.
+   */
   updateAllCommand(toolchain: Toolchain): Command | null;
 
   /**
    * Some ecosystems have no CLI for a given edit (requirements.txt pins, Maven
    * POM versions). Those providers implement this instead, returning the new
    * manifest text, and the host applies it as a WorkspaceEdit.
+   *
+   * @param manifestFile The manifest's base name. A provider claiming more
+   *   than one file format (Python: requirements files and pyproject.toml)
+   *   needs it to know which grammar the text is in, and returns null for a
+   *   format it cannot edit rather than editing it as the wrong one.
    */
   editManifest?(
     manifestText: string,
@@ -212,6 +245,7 @@ export interface EcosystemProvider {
       | { kind: 'add'; name: string; version: string | null; scope: DepScope }
       | { kind: 'update'; name: string; version: string; scope: DepScope }
       | { kind: 'remove'; name: string; scope: DepScope },
+    manifestFile?: string,
   ): string | null;
 }
 

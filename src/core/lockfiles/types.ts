@@ -13,6 +13,41 @@ export type ForwardGraph = Map<string, string[]>;
 export type VersionMap = Map<string, Set<string>>;
 
 /**
+ * What a lockfile says a project resolved each package to.
+ *
+ * Three levels of certainty, most certain first — a format provides what it
+ * records:
+ *   - `importer`: the exact answer for one workspace member (npm's per-member
+ *     `node_modules`, pnpm's `importers:`). A monorepo whose members pin
+ *     different versions of one package cannot be answered any other way.
+ *   - `descriptors`: `name@range` to the version it resolved (yarn.lock
+ *     headers), which picks the right copy when several are installed.
+ *   - `all`: every copy of every package, in file order, the preferred one
+ *     first. The last resort, narrowed by the declared range when there is
+ *     more than one.
+ */
+export interface ResolvedIndex {
+  all: Map<string, string[]>;
+  /**
+   * @param importer The manifest's directory relative to the lockfile's,
+   *   `/`-separated, `''` for the lockfile's own directory.
+   */
+  importer?(importer: string): Map<string, string> | undefined;
+  descriptors?: Map<string, string>;
+}
+
+/** Appends a resolved version, keeping first-seen order and no repeats. */
+export function addResolved(
+  all: Map<string, string[]>,
+  name: string,
+  version: string,
+): void {
+  const list = all.get(name);
+  if (!list) all.set(name, [version]);
+  else if (!list.includes(version)) list.push(version);
+}
+
+/**
  * One lockfile format.
  *
  * Both readers are part of the same interface on purpose. They used to be two
@@ -29,6 +64,11 @@ export interface LockfileReader {
   edges(text: string): ForwardGraph | undefined;
   /** Resolved versions, or undefined when the file cannot be understood. */
   versions(text: string): VersionMap | undefined;
+  /**
+   * What each package resolved to, per workspace member where the format
+   * records it; undefined when the file cannot be understood.
+   */
+  resolved(text: string): ResolvedIndex | undefined;
 }
 
 /** Records one resolved version, creating the set on first sight. */

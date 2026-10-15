@@ -21,7 +21,11 @@ import {
   diffLockfileVersions,
   explainDependency,
   findDuplicateVersions,
+  lockfilePathFor,
+  mergeSharedLockfiles,
 } from '../../core/depGraph.js';
+import { describeError } from '../../core/errors.js';
+import { HttpError } from '../../core/http.js';
 import { buildLicenseSummary } from '../../core/licensePolicy.js';
 import type { HostMessage } from '../../core/protocol.js';
 import type { Scanner, ScanResult } from '../../core/scanner.js';
@@ -229,23 +233,37 @@ export class PanelInspections implements vscode.Disposable {
        * first pass through it being fifty parallel misses.
        */
       const ctx = this.lockfileScopedContext();
+      const lockfiles = new Map<string, string | undefined>();
       const results = await mapWithConcurrency(
         this.latest().groups,
         LOCAL_SCAN_CONCURRENCY,
-        async (group) => ({
-          manifestPath: group.manifestPath,
-          projectLabel: group.label,
-          ecosystem: group.ecosystem,
-          ...(await findDuplicateVersions(
+        async (group) => {
+          lockfiles.set(
             group.manifestPath,
-            group.ecosystem,
-            ctx,
-          )),
-        }),
+            await lockfileOf(group.manifestPath, group.ecosystem, ctx),
+          );
+          return {
+            manifestPath: group.manifestPath,
+            projectLabel: group.label,
+            ecosystem: group.ecosystem,
+            ...(await findDuplicateVersions(
+              group.manifestPath,
+              group.ecosystem,
+              ctx,
+            )),
+          };
+        },
       );
 
       if (controller.signal.aborted) return;
-      this.post({ type: 'duplicateVersions', requestId, results });
+      this.post({
+        type: 'duplicateVersions',
+        requestId,
+        // One entry per lockfile, not one per workspace member reading it.
+        results: mergeSharedLockfiles(results, (result) =>
+          lockfiles.get(result.manifestPath),
+        ),
+      });
     } catch (error) {
       if (controller.signal.aborted) return;
       // The panel has a spinner running; it needs telling, not just the banner.
@@ -340,10 +358,20 @@ export class PanelInspections implements vscode.Disposable {
         found.dep.installed,
         target,
         this.ctx,
+        undefined,
+        await githubToken(),
       );
       this.post({ type: 'changelogEntries', depKey, entries });
     } catch (error) {
-      this.post({ type: 'error', message: describeError(error) });
+      // Into the drawer's own section, not the global banner: release notes
+      // are a nicety for one package, and a rate limit is not an error in
+      // anything the user did.
+      this.post({
+        type: 'changelogEntries',
+        depKey,
+        entries: undefined,
+        error: changelogFailure(error),
+      });
     }
   }
 
@@ -389,12 +417,17 @@ export class PanelInspections implements vscode.Disposable {
       // group here spawns `git show` twice.
       const workingTree = this.lockfileScopedContext();
       const atRef = new Map<string, unknown>();
+      const lockfiles = new Map<string, string | undefined>();
       const results = await mapWithConcurrency(
         this.latest().groups,
         LOCAL_SCAN_CONCURRENCY,
         async (group) => {
           const dir = path.dirname(group.manifestPath);
           const stopAt = workingTree.workspaceRootFor(dir);
+          lockfiles.set(
+            group.manifestPath,
+            await lockfileOf(group.manifestPath, group.ecosystem, workingTree),
+          );
           const [before, after] = await Promise.all([
             collectVersionsFrom(dir, group.ecosystem, readAtRef, stopAt, {
               store: atRef,
@@ -421,7 +454,14 @@ export class PanelInspections implements vscode.Disposable {
       );
 
       if (controller.signal.aborted) return;
-      this.post({ type: 'dependencyDiff', requestId, ref, results });
+      this.post({
+        type: 'dependencyDiff',
+        requestId,
+        ref,
+        results: mergeSharedLockfiles(results, (result) =>
+          lockfiles.get(result.manifestPath),
+        ),
+      });
     } catch (error) {
       if (controller.signal.aborted) return;
       this.post({
@@ -464,9 +504,49 @@ export class PanelInspections implements vscode.Disposable {
   }
 }
 
-function describeError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
+/** The lockfile governing a project, through the sweep's shared memo. */
+function lockfileOf(
+  manifestPath: string,
+  ecosystem: Ecosystem,
+  ctx: ProviderContext,
+): Promise<string | undefined> {
+  const dir = path.dirname(manifestPath);
+  return lockfilePathFor(
+    dir,
+    ecosystem,
+    (absolutePath) => ctx.readFile(absolutePath),
+    ctx.workspaceRootFor(dir),
+    ctx.lockfileMemo && { store: ctx.lockfileMemo, namespace: 'lockfile-path' },
+  );
+}
+
+/**
+ * The token of a GitHub session VS Code already holds, if any.
+ *
+ * Silent: this never prompts, and returns nothing unless the user has already
+ * signed in to GitHub in VS Code and allowed this extension to use it. Release
+ * notes are not worth a sign-in dialog.
+ */
+async function githubToken(): Promise<string | undefined> {
+  try {
+    const session = await vscode.authentication.getSession('github', [], {
+      silent: true,
+    });
+    return session?.accessToken;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What to say in the drawer when release notes could not be fetched. */
+function changelogFailure(error: unknown): string {
+  if (
+    error instanceof HttpError &&
+    (error.status === 403 || error.status === 429)
+  ) {
+    return 'GitHub’s rate limit was reached. Signing in to GitHub in VS Code raises it; otherwise try again later.';
+  }
+  return `Could not fetch release notes: ${describeError(error)}`;
 }
 
 /** The name users know a registry by, which is rarely our ecosystem id. */

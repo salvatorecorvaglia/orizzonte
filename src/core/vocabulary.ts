@@ -10,7 +10,13 @@
  * it in.
  */
 
-import type { Dependency, DepScope, Severity, Vulnerability } from './types.js';
+import type {
+  Dependency,
+  DependencySource,
+  DepScope,
+  Severity,
+  Vulnerability,
+} from './types.js';
 
 /** Declaration order everywhere a scope list is shown, most-used first. */
 export const ALL_SCOPES: DepScope[] = [
@@ -72,6 +78,92 @@ export function declaredLabel(dep: Dependency): string {
     return 'inherited from workspace';
   }
   return dep.declared;
+}
+
+/**
+ * Whether a dependency is a package some registry actually serves.
+ *
+ * The other sources — a workspace sibling, a local path, a git checkout, a
+ * tarball URL — share a *name* with whatever the public registry happens to
+ * hold under it, and nothing else. Looking one up reports a stranger's
+ * versions; auditing one sends a private name to OSV; updating one replaces the
+ * local code with that stranger's package.
+ */
+export function isRegistryPackage(dep: Pick<Dependency, 'source'>): boolean {
+  return REGISTRY_SOURCES.has(dep.source ?? 'registry');
+}
+
+const REGISTRY_SOURCES: ReadonlySet<DependencySource> = new Set([
+  'registry',
+  'alias',
+  'inherited',
+]);
+
+/** The name a registry knows the package by. */
+export function registryNameOf(
+  dep: Pick<Dependency, 'name' | 'registryName'>,
+): string {
+  return dep.registryName ?? dep.name;
+}
+
+/**
+ * Whether Orizzonte can change this dependency's version from its own manifest.
+ *
+ * An `inherited` version lives in another file, and a non-registry source has
+ * no registry version to move to.
+ */
+export function isUpdatable(dep: Pick<Dependency, 'source'>): boolean {
+  const source = dep.source ?? 'registry';
+  return source === 'registry' || source === 'alias';
+}
+
+/**
+ * A short word for a dependency that is not a registry package, for the
+ * table's status column — where "UNKNOWN" would suggest a lookup failed when
+ * none was ever attempted. Undefined for registry packages.
+ */
+export function sourceLabel(
+  dep: Pick<Dependency, 'source'>,
+): string | undefined {
+  switch (dep.source) {
+    case 'workspace':
+      return 'workspace';
+    case 'path':
+      return 'local';
+    case 'git':
+      return 'git';
+    case 'url':
+      return 'url';
+    case 'private':
+      return 'private';
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Why Orizzonte will not change this dependency's version itself, when it
+ * will not. Shown in the drawer in place of the update buttons.
+ */
+export function notUpdatableReason(dep: Dependency): string | undefined {
+  switch (dep.source) {
+    case 'inherited':
+      return dep.ecosystem === 'cargo'
+        ? 'The version is inherited from the workspace root’s [workspace.dependencies]; update it there.'
+        : 'The version is set elsewhere (a catalog or patch entry); update it there.';
+    case 'workspace':
+      return 'A package from this workspace, not from the registry.';
+    case 'path':
+      return 'Installed from a local path, not from the registry.';
+    case 'git':
+      return 'Installed from a git repository, not from the registry.';
+    case 'url':
+      return 'Installed from a URL, not from the registry.';
+    case 'private':
+      return 'Served by a private registry (an .npmrc scope or GOPRIVATE), which Orizzonte does not query. Point orizzonte.registryOverrides at it to check versions.';
+    default:
+      return undefined;
+  }
 }
 
 /**

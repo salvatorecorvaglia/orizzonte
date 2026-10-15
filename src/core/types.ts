@@ -35,6 +35,44 @@ export type ToolchainId =
  */
 export type DepScope = 'prod' | 'dev' | 'build' | 'optional' | 'peer';
 
+/**
+ * Where a dependency's code comes from.
+ *
+ * - `registry` (the default when absent): an ordinary registry package.
+ * - `alias`: a registry package installed under another name (`npm:` aliases,
+ *   Cargo's `package =` renames); `registryName` holds the real one.
+ * - `inherited`: a registry package whose version is declared elsewhere (a
+ *   Cargo `workspace = true` entry). Worth looking up, not safe to rewrite
+ *   from the member.
+ * - `workspace`, `path`, `git`, `url`: not a registry package at all. Looking
+ *   one up asks the public registry about a name that may belong to someone
+ *   else, and "updating" it replaces the local source with that package.
+ * - `private`: served by a private registry the project configures outside
+ *   Orizzonte (an `.npmrc` scope, `GOPRIVATE`). Asking the public registry or
+ *   OSV about it would disclose an internal name for an answer about someone
+ *   else's package.
+ */
+export type DependencySource =
+  | 'registry'
+  | 'alias'
+  | 'inherited'
+  | 'workspace'
+  | 'path'
+  | 'git'
+  | 'url'
+  | 'private';
+
+/**
+ * The named table a dependency is declared in, where the ecosystem has more
+ * than the five scopes can express — Python's PEP 735 dependency groups,
+ * Poetry groups, and PEP 621 optional-dependency extras. Commands that edit
+ * the manifest have to name it, or they act on the wrong table.
+ */
+export interface DependencyGroup {
+  kind: 'group' | 'extra';
+  name: string;
+}
+
 /** How far behind a dependency is. `none` means it is current. */
 export type UpdateKind = 'none' | 'patch' | 'minor' | 'major' | 'unknown';
 
@@ -151,6 +189,12 @@ export interface Dependency {
   projectLabel: string;
   /** True when the registry lookup failed; the row renders in a muted state. */
   lookupFailed?: boolean;
+  /** Where the code comes from. Absent means `registry`. */
+  source?: DependencySource;
+  /** The registry's name for the package, when it differs from `name`. */
+  registryName?: string;
+  /** The named group or extra declaring it, where the ecosystem has them. */
+  group?: DependencyGroup;
 }
 
 export interface ParsedManifest {
@@ -164,6 +208,19 @@ export interface ParsedManifest {
   workspaceMembers?: string[];
   /** True when this manifest is purely a workspace root with no own deps. */
   isWorkspaceRoot?: boolean;
+}
+
+/**
+ * A manifest the scan found, whether or not it declares dependencies.
+ *
+ * `ProjectGroup` exists only for manifests with rows to show, so a brand-new
+ * project — a package.json with no dependencies yet — was invisible to the
+ * install panel, which is the one place such a project most needs to appear.
+ */
+export interface ManifestSummary {
+  manifestPath: string;
+  label: string;
+  ecosystem: Ecosystem;
 }
 
 export interface ProjectGroup {
@@ -289,4 +346,9 @@ export interface ScanSummary {
   deprecated: number;
   /** True when results came from cache because the network was unreachable. */
   stale: boolean;
+  /**
+   * True when the vulnerability check ran but could not reach all of OSV, so
+   * `vulnerable` is a lower bound rather than a clean bill of health.
+   */
+  auditIncomplete?: boolean;
 }

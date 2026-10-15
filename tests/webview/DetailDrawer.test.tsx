@@ -398,7 +398,11 @@ describe('the why tree', () => {
         onUninstall={() => {}}
       />,
     );
-    expect(screen.getByText(/Resolved from the registry/i)).toBeInTheDocument();
+    // deps.dev answers what the package pulls in, not why it is here — so the
+    // label says the dependency is declared directly and names the tree for
+    // what it is.
+    expect(screen.getByText(/Declared directly in/i)).toBeInTheDocument();
+    expect(screen.getByText(/pulls in, from deps\.dev/i)).toBeInTheDocument();
   });
 
   it('renders nested chains', () => {
@@ -469,5 +473,61 @@ describe('opening straight to the Why section', () => {
     await userEvent.keyboard('{Escape}');
 
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+/** How many messages of `type` the drawer has posted so far. */
+function countPosted(type: string): number {
+  return (posted as Array<{ type: string }>).filter(
+    (message) => message.type === type,
+  ).length;
+}
+
+describe('after a rescan', () => {
+  /*
+   * A rescan clears the "why" tree and release notes the drawer asked for. It
+   * used to ask only when the selected row changed, so an open drawer sat on
+   * "Resolving…" after every file-watcher refresh.
+   */
+  it('asks again when new scan data arrives for the same row', () => {
+    const { rerender } = renderDrawer({ scanGeneration: 1 });
+    const before = countPosted('requestWhy');
+
+    rerender(
+      <DetailDrawer
+        dep={dep()}
+        why={undefined}
+        changelogEntries={undefined}
+        changelogLoaded={false}
+        reveal="details"
+        scanGeneration={2}
+        onClose={() => {}}
+        onUpdate={() => {}}
+        onUninstall={() => {}}
+      />,
+    );
+
+    expect(countPosted('requestWhy')).toBe(before + 1);
+    expect(countPosted('requestDetails')).toBe(before + 1);
+  });
+});
+
+describe('release-note failures', () => {
+  it('explains the failure in its own section', () => {
+    renderDrawer({
+      dep: dep({
+        updateKind: 'minor',
+        latest: '18.3.1',
+        meta: {
+          name: 'react',
+          repository: 'https://github.com/facebook/react',
+        },
+      }),
+      changelogLoaded: true,
+      changelogError: 'GitHub’s rate limit was reached.',
+    });
+
+    expect(screen.getByText(/rate limit was reached/)).toBeInTheDocument();
+    expect(screen.queryByText('Loading…')).toBeNull();
   });
 });

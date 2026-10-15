@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   DepScope,
   Ecosystem,
-  ProjectGroup,
+  ManifestSummary,
   SearchResult,
 } from '../core/types.js';
 import { SCOPE_LABELS } from '../core/vocabulary.js';
@@ -23,12 +23,18 @@ import { Icon } from './Icon.js';
 import { useDismissableOverlay } from './useDismissableOverlay.js';
 
 interface Props {
-  groups: ProjectGroup[];
+  /** Every manifest a package can go into, including ones with no rows yet. */
+  groups: ManifestSummary[];
   results: SearchResult[];
   error: string | undefined;
   /** Registries that did not answer while others did. */
   partialFailure?: Ecosystem[];
   searching: boolean;
+  /**
+   * True while a scan or a write is in flight. Install and Remove are writes,
+   * and take the same rule as the table's buttons, which already respected it.
+   */
+  busy?: boolean;
   onSearch: (query: string, ecosystem: Ecosystem | 'all') => void;
   onInstall: (
     name: string,
@@ -55,6 +61,7 @@ export function SearchInstall({
   error,
   partialFailure,
   searching,
+  busy = false,
   onSearch,
   onInstall,
   onUninstall,
@@ -329,6 +336,7 @@ export function SearchInstall({
                   <button
                     type="button"
                     className="danger"
+                    disabled={busy}
                     onClick={() =>
                       onUninstall(result.name, result.ecosystem, targetManifest)
                     }
@@ -339,7 +347,7 @@ export function SearchInstall({
               ) : (
                 <button
                   type="button"
-                  disabled={!compatible || !targetManifest}
+                  disabled={busy || !compatible || !targetManifest}
                   title={disabledReason}
                   aria-describedby={
                     disabledReason ? disabledReasonId : undefined

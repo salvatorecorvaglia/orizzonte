@@ -20,6 +20,14 @@ import type { ChangelogEntry } from './types.js';
  * can be found and the window falls back to "most recent releases". */
 const MAX_ENTRIES = 15;
 
+/**
+ * How much of each release's notes is kept. Release bodies are unbounded
+ * Markdown — some projects paste their whole changelog into every release —
+ * and they are cached in `globalState`, which VS Code loads synchronously at
+ * startup. The drawer links each entry to the full release on GitHub.
+ */
+const MAX_BODY_CHARS = 4000;
+
 interface GitHubRelease {
   tag_name: string;
   name?: string;
@@ -49,6 +57,12 @@ export async function fetchChangelog(
   targetVersion: string,
   ctx: ProviderContext,
   signal?: AbortSignal,
+  /**
+   * A GitHub token, when VS Code already holds a session. Unauthenticated
+   * requests are capped at 60 an hour, which clicking through outdated rows
+   * exhausts quickly.
+   */
+  githubToken?: string,
 ): Promise<ChangelogEntry[] | undefined> {
   const coords = githubRepoFromUrl(repository);
   if (!coords) return undefined;
@@ -58,10 +72,25 @@ export async function fetchChangelog(
 
   if (!releases) {
     try {
-      releases = await ctx.http.getJson<GitHubRelease[]>(
+      const fetched = await ctx.http.getJson<GitHubRelease[]>(
         `https://api.github.com/repos/${coords.owner}/${coords.repo}/releases?per_page=30`,
-        { signal, headers: { Accept: 'application/vnd.github+json' } },
+        {
+          signal,
+          headers: {
+            Accept: 'application/vnd.github+json',
+            ...(githubToken ? { Authorization: `Bearer ${githubToken}` } : {}),
+          },
+        },
       );
+      // Only what is shown, and each body capped: see `MAX_BODY_CHARS`.
+      releases = fetched.map((release) => ({
+        tag_name: release.tag_name,
+        name: release.name,
+        body: truncate(release.body),
+        html_url: release.html_url,
+        published_at: release.published_at,
+        draft: release.draft,
+      }));
       await ctx.cache.set(key, releases, TTL.metadata);
     } catch (error) {
       // No releases published is a clean empty state, not a failure.
@@ -105,6 +134,11 @@ export async function fetchChangelog(
     body: release.body ?? '',
     url: release.html_url,
   }));
+}
+
+function truncate(body: string | undefined): string | undefined {
+  if (body === undefined || body.length <= MAX_BODY_CHARS) return body;
+  return `${body.slice(0, MAX_BODY_CHARS).trimEnd()}…`;
 }
 
 /** `v1.2.3`, `left-pad@1.2.3` and `1.2.3` all match version `1.2.3`. */

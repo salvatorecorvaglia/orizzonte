@@ -11,6 +11,7 @@ import type {
   DepScope,
   Ecosystem,
   LicenseSummary,
+  ManifestSummary,
   PackageMeta,
   ProjectDependencyDiff,
   ProjectDuplicateVersions,
@@ -104,7 +105,17 @@ export type WebviewMessage =
 
 /** Messages the extension host sends to the webview. */
 export type HostMessage =
-  | { type: 'state'; groups: ProjectGroup[]; summary: ScanSummary }
+  | {
+      type: 'state';
+      groups: ProjectGroup[];
+      summary: ScanSummary;
+      /**
+       * Every manifest found, including those with no dependencies, so the
+       * install panel can offer them as targets. Absent means "only the
+       * groups", which is how a message built from groups alone reads.
+       */
+      manifests?: ManifestSummary[];
+    }
   /**
    * Lazily fetched metadata for one package.
    *
@@ -147,6 +158,12 @@ export type HostMessage =
       type: 'changelogEntries';
       depKey: string;
       entries: ChangelogEntry[] | undefined;
+      /**
+       * Why the release notes could not be fetched, shown in the drawer's own
+       * section. A GitHub rate limit used to arrive as a global error banner
+       * for what is a secondary, per-package nicety.
+       */
+      error?: string;
     }
   | {
       type: 'dependencyDiff';

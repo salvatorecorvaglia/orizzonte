@@ -9,7 +9,7 @@
 import * as path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import { cacheKey } from '../../core/cache.js';
-import { selectLockfile } from '../../core/lockfiles/resolve.js';
+import { readInstalledVersions } from '../../core/lockfiles/installed.js';
 import type {
   Dependency,
   DepScope,
@@ -18,6 +18,8 @@ import type {
   SearchResult,
   Toolchain,
 } from '../../core/types.js';
+import { maxVersion } from '../../core/versions/index.js';
+import { isUpdatable, registryNameOf } from '../../core/vocabulary.js';
 import {
   type Command,
   dependencyKey,
@@ -35,6 +37,13 @@ import {
 } from '../shared/repository.js';
 
 const DEFAULT_REGISTRY = 'https://crates.io';
+
+/**
+ * crates.io's sparse index: one static, CDN-served file per crate listing
+ * every published version. It is what Cargo itself reads, and what crates.io
+ * asks tools to use for version data.
+ */
+const SPARSE_INDEX = 'https://index.crates.io';
 const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 
 interface CrateResponse {
@@ -101,6 +110,7 @@ export class CargoProvider implements EcosystemProvider {
         const declared = cargoConstraint(value);
         // Path and git dependencies have no registry version to compare against.
         if (declared === null) continue;
+        const registryName = renamedPackage(value);
         dependencies.push({
           key: dependencyKey(absolutePath, scope, name),
           name,
@@ -111,6 +121,19 @@ export class CargoProvider implements EcosystemProvider {
           vulnerabilities: [],
           manifestPath: absolutePath,
           projectLabel,
+          // `workspace = true` is a real crate whose version the workspace
+          // root owns: worth looking up, not rewritable from the member —
+          // `cargo add foo@2` there replaces the inheritance with a pin.
+          ...(declared === 'workspace' ? { source: 'inherited' as const } : {}),
+          // `foo = { package = "bar" }` is the crate `bar`, used as `foo`.
+          ...(registryName
+            ? {
+                registryName,
+                ...(declared === 'workspace'
+                  ? {}
+                  : { source: 'alias' as const }),
+              }
+            : {}),
         });
       }
     }
@@ -129,40 +152,29 @@ export class CargoProvider implements EcosystemProvider {
   }
 
   /**
-   * Resolved versions from the nearest lockfile at or above `manifestDir`.
-   *
-   * The walk matters for workspaces, where only the root carries a lockfile —
-   * see `core/lockfiles/resolve.ts`.
+   * Resolved versions from the nearest Cargo.lock at or above `manifestDir` —
+   * see `core/lockfiles/installed.ts`. A lockfile may hold two majors of one
+   * crate; the declared requirement picks this manifest's.
    */
   async readLockfile(
     manifestDir: string,
     ctx: ProviderContext,
+    dependencies: Dependency[] = [],
   ): Promise<Map<string, string>> {
-    const found = await selectLockfile(
+    return readInstalledVersions(
+      'cargo',
       manifestDir,
-      [{ file: 'Cargo.lock' }],
-      (absolutePath) => ctx.readFile(absolutePath),
-      ctx.workspaceRootFor(manifestDir),
-      (_candidate, text) => {
-        const resolved = new Map<string, string>();
-        try {
-          const doc = parseToml(text) as {
-            package?: Array<{ name?: string; version?: string }>;
-          };
-          for (const entry of doc.package ?? []) {
-            if (entry.name && entry.version)
-              resolved.set(entry.name, entry.version);
-          }
-        } catch {
-          // An unparseable lockfile just means no resolved versions.
-        }
-        // Undefined keeps the walk going; an empty map here would stop it at a
-        // lockfile that told us nothing.
-        return resolved.size > 0 ? resolved : undefined;
-      },
-      ctx.lockfileMemo && { store: ctx.lockfileMemo, namespace: 'resolved' },
+      ctx,
+      dependencies.map((dep) => ({
+        name: registryNameOf(dep),
+        declared: dep.declared,
+      })),
     );
-    return found ?? new Map<string, string>();
+  }
+
+  /** Cargo.lock records a crate by its real name, not a `package =` alias. */
+  lockfileName(dep: Dependency): string {
+    return registryNameOf(dep);
   }
 
   async detectToolchain(
@@ -172,12 +184,46 @@ export class CargoProvider implements EcosystemProvider {
     return { id: 'cargo', ecosystem: 'cargo', cwd: path.dirname(manifestPath) };
   }
 
+  /**
+   * Every published version of each crate.
+   *
+   * From the sparse index when talking to crates.io. The API this used to
+   * call is capped at one request per second, so a cold scan of a
+   * 200-crate workspace took over three minutes; the index is a CDN with no
+   * such cap. The index carries no download sizes — the drawer's metadata
+   * fetch still supplies those — which is the trade.
+   *
+   * A registry override still goes through the API: a private registry
+   * speaks crates.io's API, but need not serve a sparse index at the same
+   * address.
+   */
   async fetchVersions(
     names: string[],
     ctx: ProviderContext,
     signal?: AbortSignal,
   ): Promise<Map<string, VersionInfo>> {
-    const registry = ctx.registryOverride('cargo') ?? DEFAULT_REGISTRY;
+    const override = ctx.registryOverride('cargo');
+    if (!override) {
+      return fetchVersionsWithCache(
+        names,
+        ctx,
+        8,
+        (name) => cacheKey('crates', 'versions', SPARSE_INDEX, name),
+        async (name) => {
+          const text = await ctx.http.getText(
+            `${SPARSE_INDEX}/${sparseIndexPath(name)}`,
+            { signal },
+          );
+          const versions = parseSparseIndex(text);
+          if (versions.length === 0) return undefined;
+          return { versions, latest: maxVersion('cargo', versions) };
+        },
+        (name) => this.isValidPackageName(name),
+        'cargo',
+      );
+    }
+
+    const registry = override;
     return fetchVersionsWithCache(
       names,
       ctx,
@@ -215,6 +261,7 @@ export class CargoProvider implements EcosystemProvider {
       // anything that is not a real crate name cannot resolve, and should
       // not be pasted into a URL to find that out.
       (name) => this.isValidPackageName(name),
+      'cargo',
     );
   }
 
@@ -293,10 +340,8 @@ export class CargoProvider implements EcosystemProvider {
   ): Command | null {
     if (!this.isValidPackageName(name)) return null;
     const spec = version ? `${name}@${version}` : name;
-    const flags =
-      scope === 'dev' ? ['--dev'] : scope === 'build' ? ['--build'] : [];
     return {
-      argv: ['cargo', 'add', spec, ...flags],
+      argv: ['cargo', 'add', spec, ...tableFlags(scope)],
       cwd: toolchain.cwd,
       description: `Add ${spec}`,
     };
@@ -307,13 +352,24 @@ export class CargoProvider implements EcosystemProvider {
     dep: Dependency,
     toVersion: string,
   ): Command | null {
-    return this.installCommand(toolchain, dep.name, toVersion, dep.scope);
+    if (!isUpdatable(dep)) return null;
+    const crate = registryNameOf(dep);
+    const command = this.installCommand(toolchain, crate, toVersion, dep.scope);
+    // A renamed dependency stays renamed: without `--rename` cargo would add
+    // the crate a second time under its own name.
+    if (command && crate !== dep.name) {
+      if (!this.isValidPackageName(dep.name)) return null;
+      command.argv.push('--rename', dep.name);
+    }
+    return command;
   }
 
   uninstallCommand(toolchain: Toolchain, dep: Dependency): Command | null {
     if (!this.isValidPackageName(dep.name)) return null;
+    // `cargo remove` looks only in [dependencies] unless told otherwise, so
+    // removing a dev- or build-dependency without the flag always failed.
     return {
-      argv: ['cargo', 'remove', dep.name],
+      argv: ['cargo', 'remove', dep.name, ...tableFlags(dep.scope)],
       cwd: toolchain.cwd,
       description: `Remove ${dep.name}`,
     };
@@ -324,8 +380,56 @@ export class CargoProvider implements EcosystemProvider {
       argv: ['cargo', 'update'],
       cwd: toolchain.cwd,
       description: 'Update all dependencies within their declared ranges',
+      reach: 'ranges',
     };
   }
+}
+
+/**
+ * A crate's file in the sparse index, per the registry index layout: names of
+ * one, two and three characters get their own directories, and longer ones
+ * are sharded by their first two pairs of characters. Always lower case.
+ */
+export function sparseIndexPath(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.length <= 2) return `${lower.length}/${lower}`;
+  if (lower.length === 3) return `3/${lower[0]}/${lower}`;
+  return `${lower.slice(0, 2)}/${lower.slice(2, 4)}/${lower}`;
+}
+
+/**
+ * The versions a sparse-index file lists, yanked ones left out. One JSON
+ * object per line; a line that does not parse is skipped rather than failing
+ * the crate.
+ */
+export function parseSparseIndex(text: string): string[] {
+  const versions: string[] = [];
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue;
+    try {
+      const entry = JSON.parse(line) as { vers?: unknown; yanked?: unknown };
+      if (typeof entry.vers === 'string' && entry.yanked !== true) {
+        versions.push(entry.vers);
+      }
+    } catch {
+      // A malformed line costs one version, not the crate.
+    }
+  }
+  return versions;
+}
+
+/** The flag naming the dependency table a scope lives in. */
+function tableFlags(scope: DepScope): string[] {
+  if (scope === 'dev') return ['--dev'];
+  if (scope === 'build') return ['--build'];
+  return [];
+}
+
+/** The crate behind `foo = { package = "bar" }`, when it is renamed. */
+function renamedPackage(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const pkg = (value as Record<string, unknown>).package;
+  return typeof pkg === 'string' && pkg !== '' ? pkg : undefined;
 }
 
 /**

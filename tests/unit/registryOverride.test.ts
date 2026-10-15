@@ -148,6 +148,48 @@ describe('resolveRegistryAuthHeaders', () => {
     ).toEqual({ Authorization: 'Bearer secret-value' });
   });
 
+  it('withholds the token when the effective URL is not the one the user configured', () => {
+    // A workspace settings.json can override the URL; it must not be able to
+    // keep the user's token and point it at a host of its choosing.
+    expect(
+      resolveRegistryAuthHeaders(
+        { npm: { url: 'https://npm.internal', tokenEnvVar: 'TOK' } },
+        'node',
+        { TOK: 'secret-value' },
+        { npm: { url: 'https://attacker.example', tokenEnvVar: 'TOK' } },
+      ),
+    ).toBeUndefined();
+  });
+
+  it('sends nothing when only the workspace names a token variable', () => {
+    // `trusted` holds user-level settings alone; a workspace-only entry never
+    // reaches it, so the variable it names is never read.
+    expect(
+      resolveRegistryAuthHeaders(
+        {},
+        'node',
+        { AWS_SECRET_ACCESS_KEY: 'secret-value' },
+        {
+          npm: {
+            url: 'https://attacker.example',
+            tokenEnvVar: 'AWS_SECRET_ACCESS_KEY',
+          },
+        },
+      ),
+    ).toBeUndefined();
+  });
+
+  it('sends the user-level token when the effective URL matches it', () => {
+    expect(
+      resolveRegistryAuthHeaders(
+        { npm: { url: 'https://npm.internal/', tokenEnvVar: 'TOK' } },
+        'node',
+        { TOK: 'secret-value' },
+        { npm: 'https://npm.internal' },
+      ),
+    ).toEqual({ Authorization: 'Bearer secret-value' });
+  });
+
   it('never sends a token alongside a URL that fails its own scheme check', () => {
     // A malformed override URL means the caller falls back to the *public*
     // registry — a token must not ride along to wherever that ends up.

@@ -74,9 +74,8 @@ export class GradleProvider implements EcosystemProvider {
   async parse(
     absolutePath: string,
     text: string,
-    ctx: ProviderContext,
+    _ctx: ProviderContext,
   ): Promise<ParsedManifest> {
-    void ctx;
     if (path.basename(absolutePath) === 'libs.versions.toml') {
       return this.parseVersionCatalog(absolutePath, text);
     }
@@ -225,10 +224,10 @@ export class GradleProvider implements EcosystemProvider {
 
   async fetchMetadata(
     name: string,
-    ctx: ProviderContext,
-    signal?: AbortSignal,
+    _ctx: ProviderContext,
+    _signal?: AbortSignal,
   ): Promise<PackageMeta | undefined> {
-    return fetchMavenMetadata(name, ctx, signal);
+    return fetchMavenMetadata(name);
   }
 
   async search(
@@ -251,14 +250,15 @@ export class GradleProvider implements EcosystemProvider {
     return null;
   }
 
-  updateAllCommand(toolchain: Toolchain): Command | null {
-    // Only meaningful when dependency locking is switched on. Falls back to a
-    // system `gradle` when the project ships no wrapper.
-    return {
-      argv: [toolchain.wrapper ?? 'gradle', 'dependencies', '--write-locks'],
-      cwd: toolchain.cwd,
-      description: 'Refresh Gradle dependency locks',
-    };
+  /**
+   * None. Gradle has no command that updates declared versions — the one this
+   * used to run, `dependencies --write-locks`, rewrites lock state and changes
+   * nothing in the build script, so "Update All" reported success and left
+   * every row outdated. Returning null makes the host update each package
+   * through `editManifest` instead, which does change the declared versions.
+   */
+  updateAllCommand(_toolchain: Toolchain): Command | null {
+    return null;
   }
 
   /**

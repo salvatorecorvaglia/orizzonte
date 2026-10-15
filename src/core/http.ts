@@ -62,6 +62,9 @@ const RATE_LIMITS: Record<string, number> = {
   'proxy.golang.org': 10,
 };
 
+/** Hosts whose etiquette asks for a contact address in the User-Agent. */
+const CONTACT_HOSTS = ['packagist.org'];
+
 export interface HttpOptions {
   signal?: AbortSignal;
   headers?: Record<string, string>;
@@ -144,6 +147,8 @@ export class HttpClient {
   /** Running total of `etagCache`'s body sizes, so eviction need not re-add them. */
   private etagBytes = 0;
   private userAgent: string;
+  /** The User-Agent with the contact address, for the hosts that ask for one. */
+  private contactUserAgent: string;
 
   /**
    * How many requests this client has issued.
@@ -160,12 +165,31 @@ export class HttpClient {
   }
 
   constructor(extensionVersion: string, contactEmail?: string) {
-    this.userAgent = buildUserAgent(extensionVersion, contactEmail);
+    this.userAgent = buildUserAgent(extensionVersion);
+    this.contactUserAgent = buildUserAgent(extensionVersion, contactEmail);
   }
 
   /** Rebuilds the User-Agent after the user edits `orizzonte.contactEmail`. */
   setContactEmail(extensionVersion: string, contactEmail?: string): void {
-    this.userAgent = buildUserAgent(extensionVersion, contactEmail);
+    this.userAgent = buildUserAgent(extensionVersion);
+    this.contactUserAgent = buildUserAgent(extensionVersion, contactEmail);
+  }
+
+  /**
+   * The User-Agent for one request.
+   *
+   * The contact address goes only to the registries that ask for one —
+   * Packagist does, to reach clients about unusual traffic. It used to ride on
+   * every request, handing the user's email to GitHub, OSV, deps.dev and every
+   * other host a scan touches.
+   */
+  private userAgentFor(url: string): string {
+    const host = new URL(url).hostname;
+    return CONTACT_HOSTS.some(
+      (contact) => host === contact || host.endsWith(`.${contact}`),
+    )
+      ? this.contactUserAgent
+      : this.userAgent;
   }
 
   async getJson<T>(url: string, options: HttpOptions = {}): Promise<T> {
@@ -245,7 +269,7 @@ export class HttpClient {
         : this.etagCache.get(cacheKey);
 
     const headers: Record<string, string> = {
-      'User-Agent': this.userAgent,
+      'User-Agent': this.userAgentFor(url),
       Accept: 'application/json',
       ...options.headers,
     };
@@ -280,6 +304,7 @@ export class HttpClient {
 
       // 304 means our cached copy is still good.
       if (response.status === 304) {
+        await discardBody(response);
         if (cached) return cached.body;
         /*
          * A 304 we cannot honour: the entry we validated against was evicted
@@ -297,6 +322,9 @@ export class HttpClient {
 
       if (response.status === 429 || response.status >= 500) {
         if (retryCount < MAX_ATTEMPTS - 1) {
+          // Released before waiting: the retry opens its own connection, and
+          // an unread body pins this one until garbage collection gets to it.
+          await discardBody(response);
           const retryAfter = Number(response.headers.get('retry-after'));
           const requested =
             Number.isFinite(retryAfter) && retryAfter > 0
@@ -327,6 +355,9 @@ export class HttpClient {
       }
 
       if (!response.ok) {
+        // A 404 is routine here — every private or renamed package produces
+        // one — so a scan can leave hundreds of unread error bodies behind.
+        await discardBody(response);
         throw new HttpError(
           `${response.status} ${response.statusText}`,
           response.status,
@@ -422,6 +453,22 @@ function etagCacheKey(
 function buildUserAgent(version: string, contactEmail?: string): string {
   const contact = contactEmail?.trim() ? `; mailto=${contactEmail.trim()}` : '';
   return `Orizzonte-VSCode/${version} (+https://github.com/salvatorecorvaglia/orizzonte${contact})`;
+}
+
+/**
+ * Releases a response whose body will not be read.
+ *
+ * Node's `fetch` keeps the underlying connection checked out until the body is
+ * consumed or cancelled; leaving it to the garbage collector holds sockets open
+ * for as long as that takes. Best-effort — a body that is already closed or
+ * errored has nothing left to release.
+ */
+async function discardBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Nothing to release.
+  }
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

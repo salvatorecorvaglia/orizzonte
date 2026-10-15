@@ -4,7 +4,11 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { auditDependencies, parseCvssBaseScore } from '../../src/core/audit.js';
+import {
+  auditDependencies,
+  fixedVersionFor,
+  parseCvssBaseScore,
+} from '../../src/core/audit.js';
 import type { Dependency, ProjectGroup } from '../../src/core/types.js';
 import { makeContext } from './helpers.js';
 
@@ -232,7 +236,9 @@ describe('auditDependencies', () => {
     const ctx = makeContext();
 
     // A failing audit must not reject: it greys out a badge, nothing more.
-    await expect(auditDependencies(groups, ctx)).resolves.toBeUndefined();
+    await expect(auditDependencies(groups, ctx)).resolves.toEqual({
+      complete: false,
+    });
     expect(groups[0].dependencies[0].vulnerabilities).toEqual([]);
   });
 });
@@ -403,5 +409,180 @@ describe('advisories with no readable severity', () => {
 
     expect(vuln?.severity).toBe('high');
     expect(vuln?.severityUnknown).toBeUndefined();
+  });
+});
+
+describe('fix versions per dependency', () => {
+  /*
+   * One advisory, two release lines. Taking the first `fixed` event anywhere
+   * in the record told a 2.x user to "upgrade" to 1.2.3.
+   */
+  const advisory = {
+    id: 'GHSA-lines',
+    summary: 'Two release lines',
+    database_specific: { severity: 'HIGH' },
+    affected: [
+      {
+        package: { name: 'other-pkg', ecosystem: 'npm' },
+        ranges: [
+          { type: 'SEMVER', events: [{ introduced: '0' }, { fixed: '9.9.9' }] },
+        ],
+      },
+      {
+        package: { name: 'lodash', ecosystem: 'npm' },
+        ranges: [
+          {
+            type: 'SEMVER',
+            events: [
+              { introduced: '0' },
+              { fixed: '1.2.3' },
+              { introduced: '2.0.0' },
+              { fixed: '2.0.1' },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  it('reports the fix in the release line the installed version is on', async () => {
+    const groups = [
+      groupWith([
+        { name: 'lodash', installed: '2.0.0' },
+        { name: 'lodash', installed: '1.0.0', key: 'old' },
+      ]),
+    ];
+    const { ctx } = auditContext({
+      batch: {
+        results: [
+          { vulns: [{ id: 'GHSA-lines' }] },
+          { vulns: [{ id: 'GHSA-lines' }] },
+        ],
+      },
+      vulns: { 'GHSA-lines': advisory },
+    });
+
+    await auditDependencies(groups, ctx);
+
+    expect(groups[0].dependencies[0].vulnerabilities[0].fixedVersion).toBe(
+      '2.0.1',
+    );
+    expect(groups[0].dependencies[1].vulnerabilities[0].fixedVersion).toBe(
+      '1.2.3',
+    );
+  });
+
+  it('ignores ranges belonging to another package in the same advisory', () => {
+    expect(
+      fixedVersionFor(
+        advisory.affected,
+        { name: 'lodash', installed: '2.0.0', ecosystem: 'node' },
+        'npm',
+      ),
+    ).toBe('2.0.1');
+  });
+
+  it('never suggests a fix older than what is installed', () => {
+    expect(
+      fixedVersionFor(
+        [
+          {
+            ranges: [
+              {
+                type: 'ECOSYSTEM',
+                events: [{ introduced: '0' }, { fixed: '1.5.0' }],
+              },
+              {
+                type: 'ECOSYSTEM',
+                events: [{ introduced: '3.0.0' }, { fixed: '3.1.0' }],
+              },
+            ],
+          },
+        ],
+        { name: 'x', installed: '2.0.0', ecosystem: 'node' },
+        'npm',
+      ),
+    ).toBe('3.1.0');
+  });
+
+  it('matches PyPI package names after PEP 503 normalisation', () => {
+    expect(
+      fixedVersionFor(
+        [
+          {
+            package: { name: 'Typing_Extensions', ecosystem: 'PyPI' },
+            ranges: [
+              {
+                type: 'ECOSYSTEM',
+                events: [{ introduced: '0' }, { fixed: '4.7.0' }],
+              },
+            ],
+          },
+        ],
+        { name: 'typing-extensions', installed: '4.5.0', ecosystem: 'python' },
+        'PyPI',
+      ),
+    ).toBe('4.7.0');
+  });
+});
+
+describe('severity from several CVSS vectors', () => {
+  it('scores a v3 vector listed after one it cannot score', async () => {
+    const groups = [groupWith([{ name: 'lodash' }])];
+    const { ctx } = auditContext({
+      batch: { results: [{ vulns: [{ id: 'GHSA-v4' }] }] },
+      vulns: {
+        'GHSA-v4': {
+          id: 'GHSA-v4',
+          summary: 'x',
+          severity: [
+            {
+              type: 'CVSS_V4',
+              score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H',
+            },
+            {
+              type: 'CVSS_V3',
+              score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+            },
+          ],
+        },
+      },
+    });
+
+    await auditDependencies(groups, ctx);
+
+    const [vuln] = groups[0].dependencies[0].vulnerabilities;
+    expect(vuln.severity).toBe('critical');
+    expect(vuln.severityUnknown).toBeUndefined();
+  });
+
+  it('does not read an empty score as a confident zero', () => {
+    expect(parseCvssBaseScore('')).toBeUndefined();
+  });
+});
+
+describe('audit completeness', () => {
+  it('reports complete when every batch and record arrived', async () => {
+    const groups = [groupWith([{ name: 'lodash' }])];
+    const { ctx } = auditContext({
+      batch: { results: [{ vulns: [{ id: 'GHSA-ok' }] }] },
+      vulns: { 'GHSA-ok': { id: 'GHSA-ok', summary: 'x' } },
+    });
+
+    await expect(auditDependencies(groups, ctx)).resolves.toEqual({
+      complete: true,
+    });
+  });
+
+  it('reports incomplete when an advisory record could not be fetched', async () => {
+    const groups = [groupWith([{ name: 'lodash' }])];
+    const { ctx } = auditContext({
+      batch: { results: [{ vulns: [{ id: 'GHSA-missing' }] }] },
+      vulns: {},
+    });
+
+    await expect(auditDependencies(groups, ctx)).resolves.toEqual({
+      complete: false,
+    });
   });
 });

