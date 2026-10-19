@@ -5,12 +5,10 @@ on:
     branches: [ main, master ]
     paths-ignore:
       - '**.md'
-      - 'docs/**'
   pull_request:
     branches: [ main, master ]
     paths-ignore:
       - '**.md'
-      - 'docs/**'
   workflow_dispatch:
   schedule:
     - cron: '17 6 * * 1'
