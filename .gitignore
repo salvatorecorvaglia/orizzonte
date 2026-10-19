@@ -33,13 +33,6 @@ pnpm-debug.log*
 !.env.example
 
 # IDEs & Editors
-# .vscode/ is deliberately tracked: launch.json is how a contributor runs the
-# extension host, so it belongs in the repo rather than in each clone.
-# The fixtures workspace is the exception: it's the `workspaceFolder` the
-# integration suite runs against, and any test that updates configuration at
-# ConfigurationTarget.Workspace (see tests/integration/watcher.test.ts)
-# leaves VS Code's own settings.json behind there — a test artifact, not
-# something to commit.
 tests/fixtures/.vscode/
 .idea/
 .zed/

@@ -135,7 +135,6 @@ pnpm run test:integration
 4. **Open a Pull Request**:
    - Provide a clear title and description explaining the motivation and changes made.
    - Link related issues (e.g. `Fixes #123`).
-   - Ensure all CI workflow checks pass.
 
 ---
 
