@@ -596,7 +596,6 @@ function scopeFlags(toolchain: Toolchain, scope: DepScope): string[] {
   }
 }
 
-/** `"packageManager": "pnpm@9.1.0"` — the manager and its major. */
 const PACKAGE_MANAGER_PATTERN = /"packageManager"\s*:\s*"([a-z]+)@(\d+)?/;
 
 /** Lockfiles that identify a manager, checked in this order per directory. */
