@@ -1,6 +1,6 @@
 {
   "name": "gitignore-kept-pkg",
   "dependencies": {
-    "lodash": "^4.0.0"
+    "lodash": "^4.18.1"
   }
 }
