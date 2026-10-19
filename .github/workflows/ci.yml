@@ -18,7 +18,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -46,27 +46,15 @@ jobs:
       - name: Run Biome lint
         run: pnpm run lint
 
-  typecheck:
-    name: Typecheck
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Run TypeScript typecheck
         run: pnpm run typecheck
+
+  typecheck:
+    name: Typecheck
+    needs: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "TypeScript checked in the lint job"
 
   test:
     name: Unit Tests (${{ matrix.os }})
@@ -91,8 +79,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run Vitest with coverage
+      - name: Run tests with coverage (Linux)
+        if: matrix.os == 'ubuntu-24.04'
         run: pnpm run test:coverage
+
+      - name: Run tests (other platforms)
+        if: matrix.os != 'ubuntu-24.04'
+        run: pnpm test
 
   integration-test:
     name: Integration Tests (${{ matrix.os }})
