@@ -16,7 +16,6 @@ coverage/
 .vitest/
 .biome_cache/
 .vite/
-.eslintcache
 .tsbuildinfo
 
 # Logs
