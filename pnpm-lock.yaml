@@ -59,8 +59,8 @@ importers:
         specifier: ^7.8.0
         version: 7.8.0
       '@types/vscode':
-        specifier: ~1.107.0
-        version: 1.107.0
+        specifier: ~1.140.0
+        version: 1.140.0
       '@vitejs/plugin-react':
         specifier: ^6.1.2
         version: 6.1.2(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(yaml@2.9.1))
@@ -990,8 +990,8 @@ packages:
   '@types/semver@7.8.0':
     resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
-  '@types/vscode@1.107.0':
-    resolution: {integrity: sha512-XS8YE1jlyTIowP64+HoN30OlC1H9xqSlq1eoLZUgFEC8oUTO6euYZxti1xRiLSfZocs4qytTzR6xCBYtioQTCg==}
+  '@types/vscode@1.140.0':
+    resolution: {integrity: sha512-KAB5RBZIgnUhpp4mKsVJPPHLOQKu6WtGy2xpfWjaajEXO4xIIC+UESAXLiQ9ewx6QD1uBmvC/S8BJzkbvv4bRA==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -3262,7 +3262,7 @@ snapshots:
 
   '@types/semver@7.8.0': {}
 
-  '@types/vscode@1.107.0': {}
+  '@types/vscode@1.140.0': {}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
