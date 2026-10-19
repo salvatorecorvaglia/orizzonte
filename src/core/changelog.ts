@@ -12,7 +12,7 @@
 
 import type { ProviderContext } from '../providers/provider.js';
 import { githubRepoFromUrl } from '../providers/shared/repository.js';
-import { cacheKey, TTL } from './cache.js';
+import { cacheKey, credentialCacheKey, TTL } from './cache.js';
 import { HttpError } from './http.js';
 import type { ChangelogEntry } from './types.js';
 
@@ -67,7 +67,10 @@ export async function fetchChangelog(
   const coords = githubRepoFromUrl(repository);
   if (!coords) return undefined;
 
-  const key = cacheKey('github', 'releases', coords.owner, coords.repo);
+  const key = credentialCacheKey(
+    cacheKey('github', 'releases', coords.owner, coords.repo),
+    githubToken ? { Authorization: `Bearer ${githubToken}` } : undefined,
+  );
   let releases = ctx.cache.get<GitHubRelease[]>(key);
 
   if (!releases) {

@@ -19,6 +19,8 @@ const TERMINAL_NAME = 'Orizzonte';
 
 export class TerminalRunner implements vscode.Disposable {
   private terminal: vscode.Terminal | undefined;
+  private disposed = false;
+  private readonly pending = new Set<() => void>();
   private readonly disposables: vscode.Disposable[] = [];
 
   /** See `SerialQueue`: one terminal cannot run two commands at once. */
@@ -30,27 +32,20 @@ export class TerminalRunner implements vscode.Disposable {
   /**
    * Whether the current terminal's last command is known to have finished.
    *
-   * Without shell integration a command is typed into the terminal and the
-   * runner moves on with no idea when it ends. Disposing that terminal to open
-   * one in another directory then killed an install still in progress — which
-   * a bulk action across two projects did routinely.
+   * Without shell integration a command is prepared for manual execution.
+   * Block further managed commands until that terminal is closed, since the
+   * user may have started it and its completion cannot be verified.
    */
   private lastCommandSettled = true;
 
-  /**
-   * Terminals replaced while a command might still be running in them. Left
-   * open for the user; closed only when the runner itself goes away.
-   */
-  private readonly retired = new Set<vscode.Terminal>();
-
-  constructor() {
+  constructor(private readonly completionTimeoutMs = 10 * 60 * 1000) {
     this.disposables.push(
       vscode.window.onDidCloseTerminal((closed) => {
         if (closed === this.terminal) {
+          for (const cancel of [...this.pending]) cancel();
           this.terminal = undefined;
           this.lastCommandSettled = true;
         }
-        this.retired.delete(closed);
       }),
     );
   }
@@ -59,9 +54,9 @@ export class TerminalRunner implements vscode.Disposable {
    * Runs `command` once every command queued before it has finished.
    *
    * With shell integration we get the real exit code. Without it (an unsupported
-   * shell, or integration still starting up) we fall back to a bounded wait and
-   * report `undefined`, letting the caller refresh from disk instead of trusting
-   * a status it cannot know.
+   * shell, or integration still starting up) we prepare a command for manual execution and
+   * report `undefined`. A subsequent managed command is blocked until the user
+   * closes that terminal.
    */
   run(command: Command): Promise<{ exitCode: number | undefined }> {
     return this.queue.run(() => this.execute(command));
@@ -70,6 +65,10 @@ export class TerminalRunner implements vscode.Disposable {
   private async execute(
     command: Command,
   ): Promise<{ exitCode: number | undefined }> {
+    if (this.disposed)
+      throw new Error('The terminal runner has been disposed.');
+    if (!vscode.workspace.isTrusted)
+      throw new Error('Trust this workspace before running package managers.');
     const terminal = this.ensureTerminal(command.cwd);
     terminal.show(true);
 
@@ -77,20 +76,14 @@ export class TerminalRunner implements vscode.Disposable {
     // terminal; a short wait avoids needlessly falling back on the first run.
     const integration = await this.waitForShellIntegration(terminal, 3000);
 
+    if (this.disposed || this.terminal !== terminal)
+      return { exitCode: undefined };
     if (!integration) {
-      /*
-       * No shell integration, so there is nothing to hand an argv array to and
-       * we have to build the line ourselves.
-       *
-       * Which shell will read it is a guess: `vscode.env.shell` is the
-       * *default* shell for the host, and the terminal profile that actually
-       * opened may be a different one — PowerShell reported while Git Bash is
-       * configured, say. `quoting.ts` is written to be safe under all three
-       * families for exactly that reason.
-       */
+      // Prepare a command for manual review without executing it: there is no
+      // reliable completion signal for paired edits or another queued command.
       terminal.sendText(
         buildCommandLine(command.argv, detectShell(vscode.env.shell)),
-        true,
+        false,
       );
       this.lastCommandSettled = false;
       return { exitCode: undefined };
@@ -107,39 +100,36 @@ export class TerminalRunner implements vscode.Disposable {
     const execution = integration.executeCommand(executable, args);
 
     return new Promise((resolve) => {
-      const listener = vscode.window.onDidEndTerminalShellExecution((event) => {
-        if (event.execution !== execution) return;
+      const finish = (exitCode?: number) => {
         listener.dispose();
         clearTimeout(timeout);
-        this.lastCommandSettled = true;
-        resolve({ exitCode: event.exitCode });
+        this.pending.delete(cancel);
+        this.lastCommandSettled = exitCode !== undefined;
+        // Let the shell-integration end event finish updating the terminal
+        // before a queued operation tries to start its next command.
+        if (exitCode !== undefined) setImmediate(() => resolve({ exitCode }));
+        else resolve({ exitCode });
+      };
+      const cancel = () => finish();
+      const listener = vscode.window.onDidEndTerminalShellExecution((event) => {
+        if (event.execution === execution) finish(event.exitCode);
       });
-
-      // A guard against an execution that never reports completion, so the UI
-      // is never stuck showing a spinner forever.
-      const timeout = setTimeout(
-        () => {
-          listener.dispose();
-          this.lastCommandSettled = false;
-          resolve({ exitCode: undefined });
-        },
-        10 * 60 * 1000,
-      );
+      const timeout = setTimeout(cancel, this.completionTimeoutMs);
+      this.pending.add(cancel);
     });
   }
 
   private ensureTerminal(cwd: string): vscode.Terminal {
+    if (this.terminal && !this.lastCommandSettled)
+      throw new Error(
+        'The previous command has no verified completion. Review and close the Orizzonte terminal before starting another managed operation.',
+      );
     // Reuse the terminal unless the working directory changed — a monorepo can
     // target several packages in one session.
     if (this.terminal && this.terminalCwd === cwd) {
       return this.terminal;
     }
-    if (this.terminal) {
-      // Only a terminal known to be idle is closed. One whose command may
-      // still be running is left where it is, next to the new one.
-      if (this.lastCommandSettled) this.terminal.dispose();
-      else this.retired.add(this.terminal);
-    }
+    this.terminal?.dispose();
     this.lastCommandSettled = true;
     this.terminalCwd = cwd;
     this.terminal = vscode.window.createTerminal({
@@ -159,28 +149,29 @@ export class TerminalRunner implements vscode.Disposable {
     }
 
     return new Promise((resolve) => {
+      const finish = (integration?: vscode.TerminalShellIntegration) => {
+        listener.dispose();
+        clearTimeout(timer);
+        this.pending.delete(cancel);
+        resolve(integration);
+      };
+      const cancel = () => finish();
       const listener = vscode.window.onDidChangeTerminalShellIntegration(
         (event) => {
-          if (event.terminal !== terminal) return;
-          listener.dispose();
-          clearTimeout(timer);
-          resolve(event.shellIntegration);
+          if (event.terminal === terminal) finish(event.shellIntegration);
         },
       );
-
-      const timer = setTimeout(() => {
-        listener.dispose();
-        resolve(undefined);
-      }, timeoutMs);
+      const timer = setTimeout(cancel, timeoutMs);
+      this.pending.add(cancel);
     });
   }
 
   dispose(): void {
+    this.disposed = true;
+    for (const cancel of [...this.pending]) cancel();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
     this.terminal?.dispose();
-    for (const terminal of this.retired) terminal.dispose();
-    this.retired.clear();
   }
 }

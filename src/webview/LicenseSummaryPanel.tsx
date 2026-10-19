@@ -60,6 +60,11 @@ export function LicenseSummaryPanel({
         </button>
       }
     >
+      <p className="muted">
+        Licenses reported for current registry releases; they may differ from
+        the versions installed in this workspace. Private and local sources are
+        not queried.
+      </p>
       {loading && !summary && (
         <div className="empty empty--inline">Checking package licenses…</div>
       )}

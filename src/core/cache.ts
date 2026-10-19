@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * A TTL cache, optionally persisted in `ExtensionContext.globalState`.
  *
@@ -24,7 +26,8 @@ interface Entry<T> {
   expiresAt: number;
 }
 
-const STORAGE_PREFIX = 'orizzonte.cache.';
+const LEGACY_STORAGE_PREFIX = 'orizzonte.cache.';
+const STORAGE_PREFIX = 'orizzonte.cache.v2.';
 
 /**
  * How many entries the in-memory mirror holds. Comfortably above a large
@@ -208,7 +211,11 @@ export class TtlCache {
     const lapsed: string[] = [];
     const live: Array<{ key: string; expiresAt: number }> = [];
     for (const storageKey of keys) {
-      if (!storageKey.startsWith(STORAGE_PREFIX)) continue;
+      if (!storageKey.startsWith(LEGACY_STORAGE_PREFIX)) continue;
+      if (!storageKey.startsWith(STORAGE_PREFIX)) {
+        lapsed.push(storageKey);
+        continue;
+      }
       const entry = this.storage.get<Entry<unknown>>(storageKey);
       // A malformed entry is as useless as an expired one.
       if (isEntry(entry) && entry.expiresAt >= now) {
@@ -308,4 +315,15 @@ function isEntry(value: unknown): value is Entry<unknown> {
 /** Builds a collision-free cache key from its parts. */
 export function cacheKey(...parts: string[]): string {
   return parts.map((part) => encodeURIComponent(part)).join(':');
+}
+
+/** Credentials partition caches without persisting a token in the key. */
+export function credentialCacheKey(
+  key: string,
+  headers?: Record<string, string>,
+): string {
+  const auth = headers?.Authorization ?? headers?.authorization;
+  return auth
+    ? `${key}:auth:${createHash('sha256').update(auth).digest('hex')}`
+    : key;
 }

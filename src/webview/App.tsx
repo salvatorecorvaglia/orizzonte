@@ -20,7 +20,6 @@ import type {
   ProjectDuplicateVersions,
   ProjectGroup,
   ScanSummary,
-  SearchResult,
 } from '../core/types.js';
 import { ALL_SCOPES, hasUpdate, isUpdatable } from '../core/vocabulary.js';
 import { DependencyDiffPanel } from './DependencyDiffPanel.js';
@@ -31,6 +30,7 @@ import { Icon } from './Icon.js';
 import { LicenseSummaryPanel } from './LicenseSummaryPanel.js';
 import { SearchInstall } from './SearchInstall.js';
 import { type Filters, type PanelId, Toolbar } from './Toolbar.js';
+import { useRegistrySearch } from './useRegistrySearch.js';
 import { loadState, onHostMessage, post, saveState } from './vscodeApi.js';
 
 /**
@@ -237,12 +237,16 @@ export function App() {
     ProjectDependencyDiff[] | undefined
   >();
 
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [searchError, setSearchError] = useState<string | undefined>();
-  /** Registries that did not answer, when others did. */
-  const [searchPartial, setSearchPartial] = useState<Ecosystem[] | undefined>();
-  const [searching, setSearching] = useState(false);
-  const [activeRequestId, setActiveRequestId] = useState<string | undefined>();
+  const {
+    results: searchResults,
+    error: searchError,
+    partialFailure: searchPartial,
+    searching,
+    activeId: activeRequestId,
+    search: handleSearch,
+    receive: receiveSearch,
+    cancel: cancelSearch,
+  } = useRegistrySearch();
 
   /**
    * Details fetched for a row after the scan landed, by dependency key.
@@ -421,23 +425,8 @@ export function App() {
           break;
 
         case 'searchResults':
-          setSearchResults(message.results);
-          setSearchError(undefined);
-          // Some registries answered and some did not. The results are real, so
-          // they are shown — but silently dropping an ecosystem would read as
-          // "that package does not exist".
-          setSearchPartial(
-            message.failed.length > 0 ? message.failed : undefined,
-          );
-          setSearching(false);
-          setActiveRequestId(undefined);
-          break;
-
         case 'searchError':
-          setSearchError(message.message);
-          setSearchPartial(undefined);
-          setSearching(false);
-          setActiveRequestId(undefined);
+          receiveSearch(message);
           break;
 
         case 'whyTree':
@@ -549,7 +538,7 @@ export function App() {
 
     post({ type: 'ready' });
     return dispose;
-  }, []);
+  }, [receiveSearch]);
 
   /*
    * Notices are transient chatter and dismiss themselves; errors do not. An
@@ -617,17 +606,6 @@ export function App() {
     return dep && meta ? { ...dep, meta } : dep;
   }, [groups, selectedKey, metaByKey]);
 
-  const handleSearch = useCallback(
-    (query: string, ecosystem: Ecosystem | 'all') => {
-      const requestId = newRequestId();
-      setSearching(true);
-      setSearchError(undefined);
-      setActiveRequestId(requestId);
-      post({ type: 'search', query, ecosystem, requestId });
-    },
-    [],
-  );
-
   /*
    * Cancel any in-flight search when the search panel stops being the open
    * one — which now includes another panel replacing it, not just the user
@@ -636,11 +614,9 @@ export function App() {
    */
   useEffect(() => {
     if (activePanel !== 'search' && activeRequestId) {
-      post({ type: 'cancelSearch', requestId: activeRequestId });
-      setActiveRequestId(undefined);
-      setSearching(false);
+      cancelSearch();
     }
-  }, [activePanel, activeRequestId]);
+  }, [activePanel, activeRequestId, cancelSearch]);
 
   /*
    * Runs the check whenever the panel opens, and again whenever a new scan

@@ -20,7 +20,6 @@ import {
   collectVersionsFrom,
   diffLockfileVersions,
   explainDependency,
-  findDuplicateVersions,
   lockfilePathFor,
   mergeSharedLockfiles,
 } from '../../core/depGraph.js';
@@ -28,12 +27,15 @@ import { describeError } from '../../core/errors.js';
 import { HttpError } from '../../core/http.js';
 import { buildLicenseSummary } from '../../core/licensePolicy.js';
 import type { HostMessage } from '../../core/protocol.js';
+import { canLookupDependency } from '../../core/registryAccess.js';
 import type { Scanner, ScanResult } from '../../core/scanner.js';
 import type { Dependency, Ecosystem, ProjectGroup } from '../../core/types.js';
+import { registryNameOf } from '../../core/vocabulary.js';
 import {
   findDependency,
   indexInstalledPackages,
 } from '../../core/webviewRequests.js';
+import { collectProjectDuplicates } from '../../core/workspaceInspections.js';
 import type { ProviderContext } from '../../providers/provider.js';
 import { providerFor } from '../../providers/registry.js';
 import { mapWithConcurrency } from '../../providers/shared/concurrency.js';
@@ -53,6 +55,8 @@ export class PanelInspections implements vscode.Disposable {
   private readonly searches = new Map<string, AbortController>();
   /** The in-flight "why is this installed" resolution, if any. */
   private whyRequest: AbortController | undefined;
+  private detailsRequest: AbortController | undefined;
+  private changelogRequest: AbortController | undefined;
   /** The in-flight workspace-wide license check, if any. */
   private licenseRequest: AbortController | undefined;
   /**
@@ -158,8 +162,19 @@ export class PanelInspections implements vscode.Disposable {
     // host's view of "what is selected" for command-palette actions.
     this.onSelected(depKey);
 
+    this.detailsRequest?.abort();
+    const controller = new AbortController();
+    this.detailsRequest = controller;
     try {
-      const meta = await this.scanner.fetchDetails(found.dep);
+      const meta = await this.scanner.fetchDetails(
+        found.dep,
+        controller.signal,
+      );
+      if (
+        controller.signal.aborted ||
+        this.findDependency(depKey)?.dep !== found.dep
+      )
+        return;
       if (meta) {
         // Preserve any deprecation notice the version lookup already found.
         found.dep.meta = {
@@ -172,7 +187,8 @@ export class PanelInspections implements vscode.Disposable {
         this.post({ type: 'depDetails', depKey, meta: found.dep.meta });
       }
     } catch (error) {
-      this.post({ type: 'error', message: describeError(error) });
+      if (!controller.signal.aborted)
+        this.post({ type: 'error', message: describeError(error) });
     }
   }
 
@@ -223,47 +239,13 @@ export class PanelInspections implements vscode.Disposable {
     this.duplicatesRequest = controller;
 
     try {
-      /*
-       * A few at a time, not all at once.
-       *
-       * Every group here reads and parses a lockfile, and in a workspace they
-       * all resolve the *same* one — so a fifty-project monorepo used to open
-       * fifty concurrent reads of one multi-megabyte file. The shared memo
-       * collapses that to a single read; the concurrency cap is what stops the
-       * first pass through it being fifty parallel misses.
-       */
-      const ctx = this.lockfileScopedContext();
-      const lockfiles = new Map<string, string | undefined>();
-      const results = await mapWithConcurrency(
+      const results = await collectProjectDuplicates(
         this.latest().groups,
-        LOCAL_SCAN_CONCURRENCY,
-        async (group) => {
-          lockfiles.set(
-            group.manifestPath,
-            await lockfileOf(group.manifestPath, group.ecosystem, ctx),
-          );
-          return {
-            manifestPath: group.manifestPath,
-            projectLabel: group.label,
-            ecosystem: group.ecosystem,
-            ...(await findDuplicateVersions(
-              group.manifestPath,
-              group.ecosystem,
-              ctx,
-            )),
-          };
-        },
+        this.ctx,
+        controller.signal,
       );
-
-      if (controller.signal.aborted) return;
-      this.post({
-        type: 'duplicateVersions',
-        requestId,
-        // One entry per lockfile, not one per workspace member reading it.
-        results: mergeSharedLockfiles(results, (result) =>
-          lockfiles.get(result.manifestPath),
-        ),
-      });
+      if (!controller.signal.aborted)
+        this.post({ type: 'duplicateVersions', requestId, results });
     } catch (error) {
       if (controller.signal.aborted) return;
       // The panel has a spinner running; it needs telling, not just the banner.
@@ -294,8 +276,10 @@ export class PanelInspections implements vscode.Disposable {
       const unique = new Map<string, { name: string; ecosystem: Ecosystem }>();
       for (const group of this.latest().groups) {
         for (const dep of group.dependencies) {
-          unique.set(`${dep.ecosystem}::${dep.name}`, {
-            name: dep.name,
+          if (!canLookupDependency(dep, this.ctx)) continue;
+          const name = registryNameOf(dep);
+          unique.set(`${dep.ecosystem}::${name}`, {
+            name,
             ecosystem: dep.ecosystem,
           });
         }
@@ -345,6 +329,9 @@ export class PanelInspections implements vscode.Disposable {
     const found = this.findDependency(depKey);
     if (!found) return;
 
+    this.changelogRequest?.abort();
+    const controller = new AbortController();
+    this.changelogRequest = controller;
     const repository = found.dep.meta?.repository;
     const target = found.dep.latest;
     if (!repository || !target) {
@@ -358,11 +345,17 @@ export class PanelInspections implements vscode.Disposable {
         found.dep.installed,
         target,
         this.ctx,
-        undefined,
+        controller.signal,
         await githubToken(),
       );
+      if (
+        controller.signal.aborted ||
+        this.findDependency(depKey)?.dep !== found.dep
+      )
+        return;
       this.post({ type: 'changelogEntries', depKey, entries });
     } catch (error) {
+      if (controller.signal.aborted) return;
       // Into the drawer's own section, not the global banner: release notes
       // are a nicety for one package, and a rate limit is not an error in
       // anything the user did.
@@ -490,8 +483,14 @@ export class PanelInspections implements vscode.Disposable {
   }
 
   /** Calls off every request whose answer nobody is waiting for any more. */
-  abortInFlight(): void {
+  invalidateDetails(): void {
     this.whyRequest?.abort();
+    this.detailsRequest?.abort();
+    this.changelogRequest?.abort();
+  }
+
+  abortInFlight(): void {
+    this.invalidateDetails();
     this.licenseRequest?.abort();
     this.duplicatesRequest?.abort();
     this.diffRequest?.abort();

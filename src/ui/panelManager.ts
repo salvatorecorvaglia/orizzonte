@@ -129,6 +129,7 @@ export class PanelManager implements vscode.Disposable {
 
   /** Pushes a new scan result to the webview and the tree view. */
   setResult(result: ScanResult): void {
+    this.inspections.invalidateDetails();
     carryOverDetails(this.latest, result);
     this.latest = result;
     this.post({
@@ -347,7 +348,7 @@ export class PanelManager implements vscode.Disposable {
       scope,
     );
 
-    if (!applied) {
+    if (applied === 'unsupported') {
       this.post({
         type: 'error',
         message:
@@ -392,7 +393,7 @@ export class PanelManager implements vscode.Disposable {
       toVersion,
     );
 
-    if (!applied) {
+    if (applied === 'unsupported') {
       this.post({
         type: 'error',
         message:
@@ -461,7 +462,9 @@ export class PanelManager implements vscode.Disposable {
           entry.toVersion,
           toolchains,
         );
-        if (!applied) skipped.push(entry.dep.name);
+        if (applied === 'unsupported') skipped.push(entry.dep.name);
+        if (applied === 'failed') failed.push(entry.dep.name);
+        if (applied === 'pending') break;
       } catch (error) {
         // One package failing (terminal disposed mid-run, a manifest edit that
         // throws) should not abandon the rest of the batch.
@@ -505,15 +508,14 @@ export class PanelManager implements vscode.Disposable {
     const toolchains: ToolchainCache = new Map();
     for (const dep of deps) {
       try {
-        if (
-          !(await this.mutator.uninstall(
-            dep,
-            providerFor(dep.ecosystem),
-            toolchains,
-          ))
-        ) {
-          skipped.push(dep.name);
-        }
+        const outcome = await this.mutator.uninstall(
+          dep,
+          providerFor(dep.ecosystem),
+          toolchains,
+        );
+        if (outcome === 'unsupported') skipped.push(dep.name);
+        if (outcome === 'failed') failed.push(dep.name);
+        if (outcome === 'pending') break;
       } catch (error) {
         failed.push(`${dep.name} (${describeError(error)})`);
       }
@@ -545,6 +547,13 @@ export class PanelManager implements vscode.Disposable {
    * command (Gradle) is updated package by package to the latest release.
    */
   async updateAll(manifestPath: string): Promise<void> {
+    if (!vscode.workspace.isTrusted) {
+      this.post({
+        type: 'error',
+        message: 'Trust this workspace before changing dependencies.',
+      });
+      return;
+    }
     const group = this.latest.groups.find(
       (candidate) => candidate.manifestPath === manifestPath,
     );
@@ -656,7 +665,7 @@ export class PanelManager implements vscode.Disposable {
       providerFor(dep.ecosystem),
     );
 
-    if (!applied) {
+    if (applied === 'unsupported') {
       this.post({
         type: 'error',
         message: `Orizzonte could not remove ${dep.name} automatically. Opening the manifest.`,
@@ -780,5 +789,5 @@ function movesWithinRange(dep: Dependency): boolean {
 function majorUpgradeDetail(count: number, majorCount: number): string {
   return majorCount > 0
     ? `${count} package(s), including ${majorCount} major upgrade(s) that may contain breaking changes.`
-    : `${count} package(s), all minor or patch.`;
+    : `${count} package(s), with no major upgrades detected.`;
 }

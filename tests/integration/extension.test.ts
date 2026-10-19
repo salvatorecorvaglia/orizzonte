@@ -137,8 +137,8 @@ describe('scanner discovery', () => {
     assert.equal(byEcosystem.get('cargo'), 'cargo');
     assert.equal(byEcosystem.get('golang'), 'go');
     assert.equal(byEcosystem.get('composer'), 'composer');
-    // No lockfile in the fixture, so npm is the documented default.
-    assert.equal(byEcosystem.get('node'), 'npm');
+    // The fixture explicitly declares its package manager.
+    assert.equal(byEcosystem.get('node'), 'pnpm');
   });
 
   it('resolves Maven property placeholders and managed versions', async () => {

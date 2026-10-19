@@ -19,6 +19,7 @@ import {
   comparePep440,
   isPep440Prerelease,
   maxSatisfyingPep440,
+  parsePep440,
   satisfiesPep440,
 } from './pep440.js';
 
@@ -125,6 +126,20 @@ export function maxSatisfying(
 ): string | undefined {
   if (candidates.length === 0) return undefined;
   const cleaned = constraint.trim();
+  if (ecosystem === 'golang') {
+    const current = semver.parse(cleaned, { loose: true });
+    if (!current) return undefined;
+    return maxVersion(
+      ecosystem,
+      candidates.filter(
+        (version) =>
+          semver.parse(version, { loose: true })?.major === current.major,
+      ),
+    );
+  }
+  if (ecosystem === 'cargo' && /^v?\d/.test(cleaned)) {
+    return maxSatisfyingSemver(candidates, `^${cleaned}`);
+  }
   if (cleaned === '' || cleaned === '*' || cleaned === 'latest') {
     return maxVersion(ecosystem, candidates);
   }
@@ -188,8 +203,24 @@ export function classifyUpdate(
   if (!from || !to) return 'unknown';
   if (compareVersions(ecosystem, from, to) >= 0) return 'none';
 
-  const a = semver.coerce(from, { loose: true });
-  const b = semver.coerce(to, { loose: true });
+  const pythonFrom = ecosystem === 'python' ? parsePep440(from) : null;
+  const pythonTo = ecosystem === 'python' ? parsePep440(to) : null;
+  if (pythonFrom && pythonTo && pythonFrom.epoch !== pythonTo.epoch)
+    return 'major';
+  const a = pythonFrom
+    ? {
+        major: pythonFrom.release[0],
+        minor: pythonFrom.release[1] ?? 0,
+        patch: pythonFrom.release[2] ?? 0,
+      }
+    : semver.coerce(from, { loose: true });
+  const b = pythonTo
+    ? {
+        major: pythonTo.release[0],
+        minor: pythonTo.release[1] ?? 0,
+        patch: pythonTo.release[2] ?? 0,
+      }
+    : semver.coerce(to, { loose: true });
   if (!a || !b) return 'unknown';
 
   if (b.major !== a.major) return 'major';
@@ -205,25 +236,18 @@ export function classifyUpdate(
 
   if (b.minor !== a.minor) return 'minor';
   if (b.patch !== a.patch) return 'patch';
-  return 'none';
+  // Native comparison established a newer release without a numeric component change.
+  return 'release';
 }
 
-/**
- * Strips a constraint down to a concrete version for display, e.g. `^1.2.3`
- * becomes `1.2.3`. Used when no lockfile pins an exact version, and this
- * value is what the audit step matches advisories against — a wrong guess
- * means wrong vulnerability results, not just a wrong-looking cell.
- *
- * The leading `(?:\d+!)?` skips a PEP 440 epoch (`1!2.0.0`), which is
- * otherwise indistinguishable from the version itself to a plain "first run
- * of digits" match — without it this would return `1`, not `2.0.0`.
- */
+/** A display-only estimate; preserve epochs and prerelease qualifiers. */
 export function constraintToApproxVersion(
   constraint: string,
 ): string | undefined {
-  const match = /(?:\d+!)?(\d+(?:\.\d+)*(?:[-+][0-9a-zA-Z.-]+)?)/.exec(
-    constraint,
-  );
+  const match =
+    /((?:\d+!)?\d+(?:\.\d+)*(?:(?:a|b|rc|\.?post|\.?dev)\d*)?(?:[-+][0-9a-zA-Z.-]+)?)/i.exec(
+      constraint,
+    );
   return match?.[1];
 }
 

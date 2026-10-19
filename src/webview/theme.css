@@ -1632,6 +1632,7 @@ a:hover,
 }
 
 /* Status badges with soft backgrounds and high contrast text */
+.badge--release,
 .badge--patch,
 .badge--minor,
 .badge--major,
@@ -1642,6 +1643,7 @@ a:hover,
   letter-spacing: 0.03em;
 }
 
+.badge--release,
 .badge--patch {
   color: var(--orizzonte-severity-patch);
   background-color: color-mix(
@@ -1764,6 +1766,7 @@ a:hover,
  */
 .version-latest--major,
 .version-latest--minor,
+.version-latest--release,
 .version-latest--patch {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -1789,6 +1792,7 @@ a:hover,
   );
 }
 
+.version-latest--release,
 .version-latest--patch {
   color: var(--orizzonte-severity-patch);
   background-color: color-mix(

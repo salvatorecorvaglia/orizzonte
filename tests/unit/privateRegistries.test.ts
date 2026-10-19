@@ -55,7 +55,7 @@ describe('.npmrc scopes', () => {
         'registry=https://mirror.example.com/',
       ].join('\n'),
     );
-    expect([...scopes]).toEqual(['@acme']);
+    expect([...scopes]).toEqual(['@acme', '*']);
   });
 
   it('knows a scoped name from a plain one', () => {
@@ -90,7 +90,7 @@ describe('.npmrc scopes', () => {
     expect(findDep(parsed.dependencies, 'lodash').source).toBeUndefined();
   });
 
-  it('defers to a registry override, which can answer for private scopes', async () => {
+  it('preserves private provenance even with a registry override', async () => {
     const ctx = {
       ...makeContext(
         { '/ws/.npmrc': '@acme:registry=https://npm.acme.internal/\n' },
@@ -103,7 +103,7 @@ describe('.npmrc scopes', () => {
       JSON.stringify({ dependencies: { '@acme/utils': '^1.0.0' } }),
       ctx,
     );
-    expect(findDep(parsed.dependencies, '@acme/utils').source).toBeUndefined();
+    expect(findDep(parsed.dependencies, '@acme/utils').source).toBe('private');
   });
 });
 

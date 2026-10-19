@@ -8,7 +8,7 @@
  */
 
 import * as path from 'node:path';
-import { XMLParser } from 'fast-xml-parser';
+import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import type {
   Dependency,
   DepScope,
@@ -97,16 +97,13 @@ export class MavenProvider implements EcosystemProvider {
       trimValues: true,
     });
 
+    if (XMLValidator.validate(text) !== true)
+      throw new Error(`Invalid XML: ${absolutePath}`);
     let pom: Pom;
     try {
       pom = parser.parse(text) as Pom;
     } catch {
-      return {
-        ecosystem: 'maven',
-        path: absolutePath,
-        name: path.basename(path.dirname(absolutePath)),
-        dependencies: [],
-      };
+      throw new Error(`Invalid XML: ${absolutePath}`);
     }
 
     const project = pom.project;
@@ -271,10 +268,16 @@ export class MavenProvider implements EcosystemProvider {
       const block = findDeclaredBlock(manifestText, groupId, artifactId);
       if (!block) return null;
       // Take the leading whitespace with the block so we do not leave a blank line.
-      const start = manifestText.lastIndexOf('\n', block.start) + 1;
+      const lineStart = manifestText.lastIndexOf('\n', block.start) + 1;
+      const wholeLine = /^[\t ]*$/.test(
+        manifestText.slice(lineStart, block.start),
+      );
+      const start = wholeLine ? lineStart : block.start;
       return (
         manifestText.slice(0, start) +
-        manifestText.slice(block.end).replace(/^\r?\n/, '')
+        (wholeLine
+          ? manifestText.slice(block.end).replace(/^\r?\n/, '')
+          : manifestText.slice(block.end))
       );
     }
 
@@ -307,7 +310,10 @@ export class MavenProvider implements EcosystemProvider {
     if (closing === -1) return null;
 
     const lineStart = manifestText.lastIndexOf('\n', closing) + 1;
-    const indent = manifestText.slice(lineStart, closing);
+    const prefix = manifestText.slice(lineStart, closing);
+    const multiline = /^[\t ]*$/.test(prefix);
+    const insertAt = multiline ? lineStart : closing;
+    const indent = multiline ? prefix : '';
     const inner = `${indent}    `;
 
     const versionLine = edit.version
@@ -324,7 +330,7 @@ export class MavenProvider implements EcosystemProvider {
       `${indent}</dependency>\n`;
 
     return (
-      manifestText.slice(0, lineStart) + snippet + manifestText.slice(lineStart)
+      manifestText.slice(0, insertAt) + snippet + manifestText.slice(insertAt)
     );
   }
 }

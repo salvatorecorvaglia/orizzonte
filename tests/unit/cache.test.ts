@@ -63,7 +63,7 @@ describe('TtlCache', () => {
 
   it('reads through to storage on a cold start', () => {
     const storage = new MapMemento();
-    storage.store.set('orizzonte.cache.k', {
+    storage.store.set('orizzonte.cache.v2.k', {
       value: 'from disk',
       expiresAt: Date.now() + 10_000,
     });
@@ -82,8 +82,8 @@ describe('TtlCache', () => {
     // on storage means asking for the buffer to land first.
     await cache.flushNow();
 
-    expect(storage.store.has('orizzonte.cache.persisted')).toBe(true);
-    expect(storage.store.has('orizzonte.cache.ephemeral')).toBe(false);
+    expect(storage.store.has('orizzonte.cache.v2.persisted')).toBe(true);
+    expect(storage.store.has('orizzonte.cache.v2.ephemeral')).toBe(false);
     // Still readable in this session — it just does not survive a reload.
     expect(cache.get('ephemeral')).toBe(2);
   });
@@ -150,8 +150,8 @@ describe('TtlCache', () => {
       vi.advanceTimersByTime(30_000);
 
       expect(await cache.prune()).toBe(1);
-      expect(storage.store.has('orizzonte.cache.fresh')).toBe(true);
-      expect(storage.store.has('orizzonte.cache.stale')).toBe(false);
+      expect(storage.store.has('orizzonte.cache.v2.fresh')).toBe(true);
+      expect(storage.store.has('orizzonte.cache.v2.stale')).toBe(false);
     });
 
     it('leaves keys belonging to other extensions alone', async () => {
@@ -167,8 +167,8 @@ describe('TtlCache', () => {
 
     it('drops malformed entries, which are as useless as expired ones', async () => {
       const storage = new MapMemento();
-      storage.store.set('orizzonte.cache.broken', { value: 1 }); // no expiresAt
-      storage.store.set('orizzonte.cache.alsoBroken', null);
+      storage.store.set('orizzonte.cache.v2.broken', { value: 1 }); // no expiresAt
+      storage.store.set('orizzonte.cache.v2.alsoBroken', null);
 
       expect(await new TtlCache(storage).prune()).toBe(2);
       expect(storage.store.size).toBe(0);
@@ -192,15 +192,15 @@ describe('TtlCache', () => {
 
       const originalUpdate = storage.update.bind(storage);
       storage.update = (key: string, value: unknown) => {
-        if (key === 'orizzonte.cache.stale-a') {
+        if (key === 'orizzonte.cache.v2.stale-a') {
           return Promise.reject(new Error('storage unavailable'));
         }
         return originalUpdate(key, value);
       };
 
       await expect(cache.prune()).resolves.toBe(1);
-      expect(storage.store.has('orizzonte.cache.stale-a')).toBe(true);
-      expect(storage.store.has('orizzonte.cache.stale-b')).toBe(false);
+      expect(storage.store.has('orizzonte.cache.v2.stale-a')).toBe(true);
+      expect(storage.store.has('orizzonte.cache.v2.stale-b')).toBe(false);
     });
   });
 });
@@ -255,7 +255,7 @@ describe('write batching', () => {
     ]);
     await cache.flushNow();
 
-    expect(writes).toEqual(['orizzonte.cache.pkg']);
+    expect(writes).toEqual(['orizzonte.cache.v2.pkg']);
     // The last write wins, and the in-memory mirror agrees with storage.
     expect(cache.get('pkg')).toEqual({ v: 3 });
   });
@@ -279,8 +279,8 @@ describe('write batching', () => {
     await cache.set('pkg', 'value', 60_000);
     await cache.flushNow();
 
-    expect(writes).toContain('orizzonte.cache.pkg');
-    expect(memento.get('orizzonte.cache.pkg')).toBeDefined();
+    expect(writes).toContain('orizzonte.cache.v2.pkg');
+    expect(memento.get('orizzonte.cache.v2.pkg')).toBeDefined();
   });
 
   it('flushes on its own timer without anyone asking', async () => {
@@ -297,7 +297,7 @@ describe('write batching', () => {
       vi.useRealTimers();
     }
 
-    expect(writes).toContain('orizzonte.cache.pkg');
+    expect(writes).toContain('orizzonte.cache.v2.pkg');
     void memento;
   });
 
@@ -305,14 +305,14 @@ describe('write batching', () => {
     // One failed removal must not abandon the rest of the sweep.
     const store = new Map<string, unknown>();
     const lapsed = { value: 'x', expiresAt: Date.now() - 1000 };
-    store.set('orizzonte.cache.a', lapsed);
-    store.set('orizzonte.cache.b', lapsed);
-    store.set('orizzonte.cache.c', lapsed);
+    store.set('orizzonte.cache.v2.a', lapsed);
+    store.set('orizzonte.cache.v2.b', lapsed);
+    store.set('orizzonte.cache.v2.c', lapsed);
 
     const cache = new TtlCache({
       get: <T>(key: string) => store.get(key) as T | undefined,
       update: (key: string, value: unknown) => {
-        if (key === 'orizzonte.cache.b')
+        if (key === 'orizzonte.cache.v2.b')
           return Promise.reject(new Error('nope'));
         store.delete(key);
         void value;
@@ -322,8 +322,8 @@ describe('write batching', () => {
     });
 
     expect(await cache.prune()).toBe(2);
-    expect(store.has('orizzonte.cache.a')).toBe(false);
-    expect(store.has('orizzonte.cache.c')).toBe(false);
+    expect(store.has('orizzonte.cache.v2.a')).toBe(false);
+    expect(store.has('orizzonte.cache.v2.c')).toBe(false);
   });
 });
 
@@ -334,7 +334,7 @@ describe('entries written by an older version', () => {
     // non-numeric `expiresAt` makes `expiresAt < Date.now()` false, so the
     // entry never expired and was served as fresh forever.
     const storage = new MapMemento();
-    storage.store.set('orizzonte.cache.k', {
+    storage.store.set('orizzonte.cache.v2.k', {
       value: 'stale forever',
       expiresAt: 'not a number',
     });
@@ -344,17 +344,17 @@ describe('entries written by an older version', () => {
 
   it('ignores a stored entry that is not an object at all', () => {
     const storage = new MapMemento();
-    storage.store.set('orizzonte.cache.k', 'just a string');
+    storage.store.set('orizzonte.cache.v2.k', 'just a string');
 
     expect(new TtlCache(storage).get('k')).toBeUndefined();
   });
 
   it('prunes a malformed entry rather than leaving it in place', async () => {
     const storage = new MapMemento();
-    storage.store.set('orizzonte.cache.bad', { value: 1, expiresAt: null });
+    storage.store.set('orizzonte.cache.v2.bad', { value: 1, expiresAt: null });
 
     expect(await new TtlCache(storage).prune()).toBe(1);
-    expect(storage.store.has('orizzonte.cache.bad')).toBe(false);
+    expect(storage.store.has('orizzonte.cache.v2.bad')).toBe(false);
   });
 });
 
@@ -369,7 +369,7 @@ describe('the persisted entry cap', () => {
     const now = Date.now();
     const total = 10_050;
     for (let index = 0; index < total; index++) {
-      storage.store.set(`orizzonte.cache.k${index}`, {
+      storage.store.set(`orizzonte.cache.v2.k${index}`, {
         value: index,
         // Ascending, so the lowest indices are the soonest to expire.
         expiresAt: now + 60_000 + index,
@@ -381,16 +381,31 @@ describe('the persisted entry cap', () => {
     expect(removed).toBe(total - 10_000);
     expect(storage.store.size).toBe(10_000);
     // The soonest-expiring went first; the longest-lived survived.
-    expect(storage.store.has('orizzonte.cache.k0')).toBe(false);
-    expect(storage.store.has(`orizzonte.cache.k${total - 1}`)).toBe(true);
+    expect(storage.store.has('orizzonte.cache.v2.k0')).toBe(false);
+    expect(storage.store.has(`orizzonte.cache.v2.k${total - 1}`)).toBe(true);
   });
 
   it('leaves a storage under the limit untouched', async () => {
     const storage = new MapMemento();
     const now = Date.now();
-    storage.store.set('orizzonte.cache.k', { value: 1, expiresAt: now + 1000 });
+    storage.store.set('orizzonte.cache.v2.k', {
+      value: 1,
+      expiresAt: now + 1000,
+    });
 
     expect(await new TtlCache(storage).prune(now)).toBe(0);
     expect(storage.store.size).toBe(1);
   });
+});
+
+it('does not reuse legacy registry data before credential partitioning', async () => {
+  const storage = new MapMemento();
+  storage.store.set('orizzonte.cache.pkg', {
+    value: 'old authenticated data',
+    expiresAt: Date.now() + 10000,
+  });
+  const cache = new TtlCache(storage);
+  expect(cache.get('pkg')).toBeUndefined();
+  expect(await cache.prune()).toBe(1);
+  expect(storage.store.has('orizzonte.cache.pkg')).toBe(false);
 });

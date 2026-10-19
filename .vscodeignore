@@ -24,3 +24,11 @@ CONTRIBUTING.md
 CONTRIBUTORS.md
 SECURITY.md
 coverage/**
+
+playwright.config.ts
+playwright-report/**
+test-results/**
+
+.pnpm-store/**
+.agents/**
+.codex/**

@@ -116,7 +116,7 @@ describe('crates.io sparse index', () => {
 });
 
 describe('compactVersionInfo', () => {
-  it('drops prereleases of versions that have already shipped', () => {
+  it('preserves prereleases that can still satisfy explicit constraints', () => {
     const compacted = compactVersionInfo('node', {
       versions: [
         '14.0.0',
@@ -128,20 +128,26 @@ describe('compactVersionInfo', () => {
       latest: '14.1.0',
     });
 
-    expect(compacted.versions).toEqual(['14.0.0', '14.1.0', '15.0.0-canary.1']);
+    expect(compacted.versions).toEqual([
+      '14.0.0',
+      '14.1.0-canary.1',
+      '14.1.0-canary.2',
+      '14.1.0',
+      '15.0.0-canary.1',
+    ]);
     expect(compacted.latest).toBe('14.1.0');
   });
 
   it('keeps a list with no stable release as it is', () => {
     const info = { versions: ['0.1.0-alpha.1', '0.1.0-alpha.2'] };
-    expect(compactVersionInfo('node', info)).toBe(info);
+    expect(compactVersionInfo('node', info)).toEqual(info);
   });
 
   it('uses the ecosystem’s own notion of a prerelease', () => {
     const compacted = compactVersionInfo('python', {
       versions: ['1.0', '1.1rc1', '1.1', '2.0a1'],
     });
-    expect(compacted.versions).toEqual(['1.0', '1.1', '2.0a1']);
+    expect(compacted.versions).toEqual(['1.0', '1.1rc1', '1.1', '2.0a1']);
   });
 });
 

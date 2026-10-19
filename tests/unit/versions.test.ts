@@ -171,11 +171,11 @@ describe('constraintToApproxVersion', () => {
     expect(constraintToApproxVersion('>=1.0.0 <2.0.0')).toBe('1.0.0');
   });
 
-  it('skips a PEP 440 epoch rather than returning it as the version', () => {
+  it('preserves a PEP 440 epoch in the estimated version', () => {
     // A "first run of digits" match would stop at "1", not the version that
     // follows the epoch marker — wrong enough to throw off OSV audit matching.
-    expect(constraintToApproxVersion('1!2.0.0')).toBe('2.0.0');
-    expect(constraintToApproxVersion('>=1!2.0.0')).toBe('2.0.0');
+    expect(constraintToApproxVersion('1!2.0.0')).toBe('1!2.0.0');
+    expect(constraintToApproxVersion('>=1!2.0.0')).toBe('1!2.0.0');
   });
 
   it('returns undefined for a constraint with no version in it', () => {

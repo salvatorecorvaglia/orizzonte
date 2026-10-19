@@ -174,6 +174,7 @@ export function notUpdatableReason(dep: Dependency): string | undefined {
  */
 export function hasUpdate(dep: Dependency): boolean {
   return (
+    dep.updateKind === 'release' ||
     dep.updateKind === 'patch' ||
     dep.updateKind === 'minor' ||
     dep.updateKind === 'major'
@@ -189,7 +190,7 @@ export function statusRank(dep: Dependency): number {
   if (dep.meta?.deprecated) return 1;
   if (dep.updateKind === 'major') return 2;
   if (dep.updateKind === 'minor') return 3;
-  if (dep.updateKind === 'patch') return 4;
+  if (dep.updateKind === 'patch' || dep.updateKind === 'release') return 4;
   return 5;
 }
 

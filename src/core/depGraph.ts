@@ -34,6 +34,7 @@ import type {
   DuplicateVersionResult,
   Ecosystem,
 } from './types.js';
+import { isRegistryPackage, registryNameOf } from './vocabulary.js';
 
 const MAX_DEPTH = 8;
 
@@ -81,7 +82,10 @@ export async function explainDependency(
     // The lookup key must go through the same normalisation the graph keys did,
     // or a manifest that declares `Jinja2` will never match a lockfile that
     // records `jinja2`.
-    const roots = tracePaths(forward, graphKey(target.name, target.ecosystem));
+    const roots = tracePaths(
+      forward,
+      graphKey(registryNameOf(target), target.ecosystem),
+    );
     if (roots.length > 0) {
       return { roots, source: 'lockfile' };
     }
@@ -240,6 +244,7 @@ async function buildFromDepsDev(
   signal?: AbortSignal,
 ): Promise<DepNode[]> {
   const provider = providerFor(target.ecosystem);
+  if (!isRegistryPackage(target)) return [];
   const system = provider.depsDevSystem;
   const version = target.installed ?? target.latest;
   if (!system || !version) return [];
@@ -247,7 +252,7 @@ async function buildFromDepsDev(
   // deps.dev takes the package name as one URL-encoded path segment; Maven
   // coordinates keep their colon, encoded as %3A.
   const url =
-    `https://api.deps.dev/v3/systems/${system}/packages/${encodeURIComponent(target.name)}` +
+    `https://api.deps.dev/v3/systems/${system}/packages/${encodeURIComponent(registryNameOf(target))}` +
     `/versions/${encodeURIComponent(version)}:dependencies`;
 
   try {

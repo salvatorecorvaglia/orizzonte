@@ -9,7 +9,9 @@
 
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { SerialQueue } from '../core/serialQueue.js';
 import type { Dependency, DepScope, Toolchain } from '../core/types.js';
+import { isUpdatable } from '../core/vocabulary.js';
 import type {
   Command,
   EcosystemProvider,
@@ -32,7 +34,10 @@ type ManifestEdit = Parameters<
  */
 export type ToolchainCache = Map<string, Toolchain>;
 
+export type MutationResult = 'applied' | 'unsupported' | 'failed' | 'pending';
+
 export class DependencyMutator {
+  private readonly queue = new SerialQueue();
   constructor(
     private readonly ctx: ProviderContext,
     private readonly terminal: TerminalRunner,
@@ -53,18 +58,21 @@ export class DependencyMutator {
     version: string | null,
     scope: DepScope,
     toolchains?: ToolchainCache,
-  ): Promise<boolean> {
-    const toolchain = await this.toolchainFor(
-      provider,
-      manifestPath,
-      toolchains,
-    );
-    const command = provider.installCommand(toolchain, name, version, scope);
-    return this.apply(provider, manifestPath, command, {
-      kind: 'add',
-      name,
-      version,
-      scope,
+  ): Promise<MutationResult> {
+    return this.queue.run(async () => {
+      requireWorkspaceTrust();
+      const toolchain = await this.toolchainFor(
+        provider,
+        manifestPath,
+        toolchains,
+      );
+      const command = provider.installCommand(toolchain, name, version, scope);
+      return this.apply(provider, manifestPath, command, {
+        kind: 'add',
+        name,
+        version,
+        scope,
+      });
     });
   }
 
@@ -73,18 +81,23 @@ export class DependencyMutator {
     provider: EcosystemProvider,
     toVersion: string,
     toolchains?: ToolchainCache,
-  ): Promise<boolean> {
-    const toolchain = await this.toolchainFor(
-      provider,
-      dep.manifestPath,
-      toolchains,
-    );
-    const command = provider.updateCommand(toolchain, dep, toVersion);
-    return this.apply(provider, dep.manifestPath, command, {
-      kind: 'update',
-      name: dep.name,
-      version: toVersion,
-      scope: dep.scope,
+  ): Promise<MutationResult> {
+    return this.queue.run(async () => {
+      requireWorkspaceTrust();
+      if (!isUpdatable(dep)) return 'unsupported';
+      const toolchain = await this.toolchainFor(
+        provider,
+        dep.manifestPath,
+        toolchains,
+      );
+      const command = provider.updateCommand(toolchain, dep, toVersion);
+      return this.apply(provider, dep.manifestPath, command, {
+        kind: 'update',
+        name: dep.name,
+        version: toVersion,
+        scope: dep.scope,
+        declaration: dep.declaration,
+      });
     });
   }
 
@@ -92,17 +105,20 @@ export class DependencyMutator {
     dep: Dependency,
     provider: EcosystemProvider,
     toolchains?: ToolchainCache,
-  ): Promise<boolean> {
-    const toolchain = await this.toolchainFor(
-      provider,
-      dep.manifestPath,
-      toolchains,
-    );
-    const command = provider.uninstallCommand(toolchain, dep);
-    return this.apply(provider, dep.manifestPath, command, {
-      kind: 'remove',
-      name: dep.name,
-      scope: dep.scope,
+  ): Promise<MutationResult> {
+    return this.queue.run(async () => {
+      requireWorkspaceTrust();
+      const toolchain = await this.toolchainFor(
+        provider,
+        dep.manifestPath,
+        toolchains,
+      );
+      const command = provider.uninstallCommand(toolchain, dep);
+      return this.apply(provider, dep.manifestPath, command, {
+        kind: 'remove',
+        name: dep.name,
+        scope: dep.scope,
+      });
     });
   }
 
@@ -115,13 +131,17 @@ export class DependencyMutator {
     provider: EcosystemProvider,
     manifestPath: string,
   ): Promise<Command | null> {
+    requireWorkspaceTrust();
     const toolchain = await provider.detectToolchain(manifestPath, this.ctx);
     return provider.updateAllCommand(toolchain);
   }
 
   /** Runs a command from `bulkUpdateCommand`. */
-  async runBulkUpdate(command: Command): Promise<void> {
-    await this.runCommand(command.argv, command.cwd, command.description);
+  async runBulkUpdate(command: Command): Promise<MutationResult> {
+    return this.queue.run(() => {
+      requireWorkspaceTrust();
+      return this.runCommand(command.argv, command.cwd, command.description);
+    });
   }
 
   /**
@@ -148,7 +168,7 @@ export class DependencyMutator {
    * build-or-fallback: the edit lands when the command does not write the
    * manifest itself, or in place of the command when there is none.
    *
-   * False means the manifest does not reflect the change and the user has to
+   * Unsupported means the manifest cannot be edited and the user has to
    * make it by hand — including when the command ran but the paired edit
    * could not be made (pip beside a pyproject.toml), which used to report
    * success and leave the manifest silently out of step with the environment.
@@ -160,17 +180,41 @@ export class DependencyMutator {
     manifestPath: string,
     command: Command | null,
     edit: ManifestEdit,
-  ): Promise<boolean> {
+  ): Promise<MutationResult> {
+    requireWorkspaceTrust();
+    let snapshot:
+      | { document: vscode.TextDocument; version: number }
+      | undefined;
+    if (command?.writesManifest === false) {
+      const document = await vscode.workspace.openTextDocument(
+        vscode.Uri.file(manifestPath),
+      );
+      if (
+        !provider.editManifest ||
+        provider.editManifest(
+          document.getText(),
+          edit,
+          path.basename(manifestPath),
+        ) === null
+      )
+        return 'unsupported';
+      snapshot = { document, version: document.version };
+    }
     if (command) {
-      const succeeded = await this.runCommand(
+      const outcome = await this.runCommand(
         command.argv,
         command.cwd,
         command.description,
       );
-      if (command.writesManifest !== false || !succeeded) return true;
-      return this.applyManifestEdit(provider, manifestPath, edit);
+      if (outcome !== 'applied' || command.writesManifest !== false)
+        return outcome;
+      if (snapshot && snapshot.document.version !== snapshot.version) {
+        this.onCommandFailed(
+          'The manifest changed while the command ran. Review it before applying the change.',
+        );
+        return 'failed';
+      }
     }
-
     return this.applyManifestEdit(provider, manifestPath, edit);
   }
 
@@ -191,7 +235,7 @@ export class DependencyMutator {
     argv: string[],
     cwd: string,
     description: string,
-  ): Promise<boolean> {
+  ): Promise<MutationResult> {
     const doneBusy = this.beginBusy(description);
     let exitCode: number | undefined;
     try {
@@ -204,9 +248,15 @@ export class DependencyMutator {
       this.onCommandFailed(
         `${argv.join(' ')} failed with exit code ${exitCode}. See the Orizzonte terminal for details.`,
       );
-      return false;
+      return 'failed';
     }
-    return true;
+    if (exitCode === undefined) {
+      this.onCommandFailed(
+        'Command completion could not be verified. Use the Orizzonte terminal to review or run the command, then refresh. Automatic follow-up edits were not applied.',
+      );
+      return 'pending';
+    }
+    return 'applied';
   }
 
   /**
@@ -217,8 +267,8 @@ export class DependencyMutator {
     provider: EcosystemProvider,
     manifestPath: string,
     edit: ManifestEdit,
-  ): Promise<boolean> {
-    if (!provider.editManifest) return false;
+  ): Promise<MutationResult> {
+    if (!provider.editManifest) return 'unsupported';
 
     const uri = vscode.Uri.file(manifestPath);
     const document = await vscode.workspace.openTextDocument(uri);
@@ -229,13 +279,13 @@ export class DependencyMutator {
       edit,
       path.basename(manifestPath),
     );
-    if (updated === null) return false;
+    if (updated === null) return 'unsupported';
 
     // A whole-document replace built from a snapshot is only safe against
     // that same snapshot — guards a future `editManifest` becoming async (or
     // any other yield landing above) from silently clobbering a concurrent
     // edit that lands in the gap.
-    if (document.version !== versionBeforeEdit) return false;
+    if (document.version !== versionBeforeEdit) return 'unsupported';
 
     const workspaceEdit = new vscode.WorkspaceEdit();
     workspaceEdit.replace(
@@ -244,14 +294,21 @@ export class DependencyMutator {
       updated,
     );
     const ok = await vscode.workspace.applyEdit(workspaceEdit);
-    if (!ok) return false;
+    if (!ok) return 'unsupported';
 
     // Only auto-save when our edit was the only change in flight. Forcing a
     // save while the user has unrelated unsaved edits open would commit those
     // too, without them having chosen to.
     if (!wasDirty) {
-      await document.save();
+      if (!(await document.save())) return 'failed';
     }
-    return true;
+    return 'applied';
   }
+}
+
+function requireWorkspaceTrust(): void {
+  if (!vscode.workspace.isTrusted)
+    throw new Error(
+      'Trust this workspace before changing dependencies or running package managers.',
+    );
 }

@@ -87,6 +87,7 @@ interface AdvisoryRecord {
 
 /** What an audit managed to establish. */
 export interface AuditOutcome {
+  skipped?: number;
   /**
    * False when some of OSV could not be reached, so the advisories found are
    * a lower bound. The UI says so: a failed audit and a clean one used to look
@@ -115,6 +116,7 @@ export async function auditDependencies(
   const queries: Query[] = [];
   const owners: Array<Array<{ group: ProjectGroup; index: number }>> = [];
   const seen = new Map<string, number>();
+  let skipped = 0;
 
   for (const group of groups) {
     const provider = providerFor(group.ecosystem);
@@ -124,10 +126,16 @@ export async function auditDependencies(
     group.dependencies.forEach((dep, index) => {
       // OSV matches on a concrete version; a range tells it nothing.
       const version = dep.installed;
-      if (!version) return;
+      if (!version || dep.installedIsApproximate) {
+        skipped++;
+        return;
+      }
       // A workspace sibling or local path is not the registry package of the
       // same name, and its name may well be private.
-      if (!isRegistryPackage(dep)) return;
+      if (!isRegistryPackage(dep)) {
+        skipped++;
+        return;
+      }
       const name = registryNameOf(dep);
 
       const identity = `${osvEcosystem}|${name}|${version}`;
@@ -146,7 +154,8 @@ export async function auditDependencies(
     });
   }
 
-  if (queries.length === 0) return { complete: true };
+  if (queries.length === 0)
+    return { complete: skipped === 0, ...(skipped > 0 ? { skipped } : {}) };
 
   // Batch, then fetch details only for the IDs that came back.
   const idsPerQuery: Array<string[]> = new Array(queries.length)
@@ -186,16 +195,27 @@ export async function auditDependencies(
           },
           { signal },
         );
-        response.results.forEach((result, i) => {
+        if (
+          !Array.isArray(response.results) ||
+          response.results.length !== slice.length
+        ) {
+          batchFailed = true;
+        }
+        for (let i = 0; i < slice.length; i++) {
+          const result = response.results?.[i];
+          if (!result || typeof result !== 'object') {
+            batchFailed = true;
+            continue;
+          }
           const queryIndex = slice[i]?.[0];
-          if (queryIndex === undefined) return;
+          if (queryIndex === undefined) continue;
           for (const vuln of result.vulns ?? []) {
             idsPerQuery[queryIndex].push(vuln.id);
           }
           if (result.next_page_token) {
             nextTokens.set(queryIndex, result.next_page_token);
           }
-        });
+        }
       } catch (error) {
         // An unreachable OSV greys out a badge; it does not break the table,
         // and it is not evidence that the registry data alongside it is stale.
@@ -217,10 +237,11 @@ export async function auditDependencies(
     if (failed) break;
     pageTokens = nextTokens;
   }
-  let complete = !batchFailed;
+  let complete = !batchFailed && pageTokens.size === 0 && skipped === 0;
 
   const uniqueIds = [...new Set(idsPerQuery.flat())];
-  if (uniqueIds.length === 0) return { complete };
+  if (uniqueIds.length === 0)
+    return { complete, ...(skipped > 0 ? { skipped } : {}) };
 
   const details = await fetchVulnerabilities(uniqueIds, ctx, signal);
   if (details.size < uniqueIds.length) complete = false;
@@ -250,7 +271,8 @@ export async function auditDependencies(
     }
   });
 
-  return { complete };
+  signal?.throwIfAborted();
+  return { complete, ...(skipped > 0 ? { skipped } : {}) };
 }
 
 function osvEcosystemOf(dep: Dependency): string | undefined {
@@ -336,6 +358,7 @@ async function fetchVulnerabilities(
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, ids.length) }, async () => {
       while (cursor < ids.length) {
+        signal?.throwIfAborted();
         const id = ids[cursor++];
         // `record`, not the `vuln` key earlier versions cached a
         // precomputed fix version under: those entries cannot answer the

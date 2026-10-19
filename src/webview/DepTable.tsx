@@ -336,7 +336,10 @@ export function DepTable({
   // Entering the grid with Tab lands on the first row rather than nowhere.
   const handleGridFocus = (event: FocusEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget) return;
-    const index = focusedIndex >= 0 ? focusedIndex : edgeDepIndex(false);
+    const index =
+      focusedIndex >= 0 && rowsRef.current[focusedIndex]?.kind === 'dep'
+        ? focusedIndex
+        : edgeDepIndex(false);
     if (index < 0) return;
     shouldFocusRef.current = true;
     setFocusedIndex(index);
@@ -692,6 +695,8 @@ function renderStatusBadge(dep: Dependency) {
       return <span className="badge badge--minor">MINOR</span>;
     case 'patch':
       return <span className="badge badge--patch">PATCH</span>;
+    case 'release':
+      return <span className="badge badge--release">RELEASE</span>;
     case 'unknown':
       return <span className="badge badge--muted">UNKNOWN</span>;
     default:

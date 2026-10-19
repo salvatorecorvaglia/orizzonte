@@ -45,6 +45,7 @@ export function createProviderContext(
     },
 
     registryOverride(ecosystem: Ecosystem): string | undefined {
+      if (!vscode.workspace.isTrusted) return undefined;
       // Restricted in package.json's untrustedWorkspaces.restrictedConfigurations,
       // so VS Code already withholds any workspace-scoped value here when the
       // workspace is untrusted — this only ever sees a value the user opted into.
@@ -57,6 +58,7 @@ export function createProviderContext(
     registryAuthHeaders(
       ecosystem: Ecosystem,
     ): Record<string, string> | undefined {
+      if (!vscode.workspace.isTrusted) return undefined;
       // The token's variable name is read from the user's own settings only.
       // restrictedConfigurations keeps workspace values out of *untrusted*
       // workspaces, but trusting a folder is not agreeing to let its

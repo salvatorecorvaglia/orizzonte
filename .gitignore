@@ -14,6 +14,8 @@ build/
 # Testing & Coverage & Caches
 coverage/
 .vitest/
+test-results/
+playwright-report/
 .biome_cache/
 .vite/
 .tsbuildinfo

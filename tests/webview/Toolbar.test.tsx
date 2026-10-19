@@ -405,3 +405,18 @@ describe('the overflow menu', () => {
     expect(roving.filter((b) => b.tabIndex === 0)).toHaveLength(1);
   });
 });
+
+describe('busy keyboard navigation', () => {
+  it('skips disabled commands and retains an enabled toolbar tab stop', async () => {
+    renderToolbar({ busy: true, onToggleLicenses: vi.fn() });
+    const add = screen.getByRole('button', { name: 'Add package' });
+    add.focus();
+    await userEvent.keyboard('{ArrowRight}');
+    expect(screen.getByRole('button', { name: 'More' })).toHaveFocus();
+    const stops = [
+      ...document.querySelectorAll<HTMLButtonElement>('button[tabindex="0"]'),
+    ];
+    expect(stops).toHaveLength(1);
+    expect(stops[0]).not.toBeDisabled();
+  });
+});

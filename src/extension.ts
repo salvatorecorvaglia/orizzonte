@@ -6,24 +6,17 @@
  * awaited, so opening a project never blocks on the network.
  */
 
-import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { TtlCache } from './core/cache.js';
-import {
-  findDuplicateVersions,
-  lockfilePathFor,
-  mergeSharedLockfiles,
-} from './core/depGraph.js';
 import { describeError, isAbortError } from './core/errors.js';
 import { HttpClient } from './core/http.js';
 import { buildReport, type ReportFormat } from './core/report.js';
 import { Scanner, type ScanResult } from './core/scanner.js';
 import { ScanQueue } from './core/scanQueue.js';
-import type { ProjectDuplicateVersions } from './core/types.js';
 import { ManifestWatcher } from './core/watcher.js';
 import { findDependency } from './core/webviewRequests.js';
 import { createProviderContext } from './core/workspace.js';
-import type { ProviderContext } from './providers/provider.js';
+import { collectProjectDuplicates } from './core/workspaceInspections.js';
 import { manifestGlob } from './providers/registry.js';
 import { DepCodeLensProvider } from './ui/depCodeLens.js';
 import { DepDiagnostics } from './ui/depDiagnostics.js';
@@ -123,15 +116,22 @@ export function activate(context: vscode.ExtensionContext): OrizzonteApi {
     doScan(request.checkUpdates, request.audit),
   );
 
+  let disposed = false;
   const runScan = (
     checkUpdates: boolean,
     audit?: boolean,
-  ): Promise<ScanResult | undefined> => scans.request({ checkUpdates, audit });
+    invalidate = false,
+  ): Promise<ScanResult | undefined> => {
+    if (disposed) return Promise.resolve(undefined);
+    if (invalidate) scans.invalidate();
+    return scans.request({ checkUpdates, audit });
+  };
 
   const doScan = async (
     checkUpdates: boolean,
     audit?: boolean,
   ): Promise<ScanResult | undefined> => {
+    if (disposed) return undefined;
     const doneBusy = panel.beginBusy(
       checkUpdates ? 'Checking registries…' : 'Reading manifests…',
     );
@@ -189,7 +189,7 @@ export function activate(context: vscode.ExtensionContext): OrizzonteApi {
   };
 
   const watcher = new ManifestWatcher(() => {
-    void runScan(networkAllowed());
+    void runScan(networkAllowed(), undefined, true);
   });
 
   context.subscriptions.push(
@@ -232,7 +232,7 @@ export function activate(context: vscode.ExtensionContext): OrizzonteApi {
     }),
 
     vscode.commands.registerCommand('orizzonte.refresh', () =>
-      runScan(networkAllowed()),
+      runScan(networkAllowed(), undefined, true),
     ),
 
     // Explicit user intent, so this ignores autoCheckUpdates — but still stays
@@ -275,7 +275,7 @@ export function activate(context: vscode.ExtensionContext): OrizzonteApi {
       // Local-only and cheap (no registry call), so gathering it fresh for
       // every export is simpler than caching an answer that may already be
       // stale by the time someone reads the report.
-      const duplicates = await collectDuplicateVersions(
+      const duplicates = await collectProjectDuplicates(
         result.groups,
         providerContext,
       );
@@ -334,13 +334,13 @@ export function activate(context: vscode.ExtensionContext): OrizzonteApi {
     // Adding or removing a folder changes which manifests exist, and no file
     // event says so: the files were there all along, just outside the view.
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      void runScan(networkAllowed());
+      void runScan(networkAllowed(), undefined, true);
     }),
 
     // Trust unlocks `orizzonte.registryOverrides`, so the registries behind
     // every version shown may just have changed.
     vscode.workspace.onDidGrantWorkspaceTrust(() => {
-      void runScan(networkAllowed());
+      void runScan(networkAllowed(), undefined, true);
     }),
 
     // Rebuilding the User-Agent keeps the contact address in sync with settings.
@@ -351,9 +351,11 @@ export function activate(context: vscode.ExtensionContext): OrizzonteApi {
       if (
         event.affectsConfiguration('orizzonte.excludeGlobs') ||
         event.affectsConfiguration('orizzonte.preferredNodeManager') ||
-        event.affectsConfiguration('orizzonte.pythonManager')
+        event.affectsConfiguration('orizzonte.pythonManager') ||
+        event.affectsConfiguration('orizzonte.registryOverrides') ||
+        event.affectsConfiguration('orizzonte.enableAudit')
       ) {
-        void runScan(false);
+        void runScan(networkAllowed(), undefined, true);
       }
       // Re-arm rather than wait for a window reload — a setting that only takes
       // effect after a restart reads as a setting that does not work.
@@ -399,6 +401,7 @@ export function activate(context: vscode.ExtensionContext): OrizzonteApi {
   armPeriodicCheck();
   context.subscriptions.push({
     dispose: () => {
+      disposed = true;
       if (periodicTimer) clearInterval(periodicTimer);
       // A scan of a large monorepo outlives the window that asked for it
       // otherwise, holding registry requests open for an extension that is
@@ -464,46 +467,6 @@ async function pickReportFormat(): Promise<ReportFormat | undefined> {
   return picked?.format;
 }
 
-/** Best-effort: a project whose ecosystem has no trustworthy lockfile just
- * reports `checked: false` rather than failing the whole export. */
-async function collectDuplicateVersions(
-  groups: ScanResult['groups'],
-  providerCtx: ProviderContext,
-): Promise<ProjectDuplicateVersions[]> {
-  // One memo for the sweep, so a workspace's shared lockfile is parsed once.
-  const ctx = { ...providerCtx, lockfileMemo: new Map<string, unknown>() };
-  const lockfiles = new Map<string, string | undefined>();
-  const results = await Promise.all(
-    groups.map(async (group) => {
-      const dir = path.dirname(group.manifestPath);
-      lockfiles.set(
-        group.manifestPath,
-        await lockfilePathFor(
-          dir,
-          group.ecosystem,
-          (absolutePath) => ctx.readFile(absolutePath),
-          ctx.workspaceRootFor(dir),
-          { store: ctx.lockfileMemo, namespace: 'lockfile-path' },
-        ),
-      );
-      return {
-        manifestPath: group.manifestPath,
-        projectLabel: group.label,
-        ecosystem: group.ecosystem,
-        ...(await findDuplicateVersions(
-          group.manifestPath,
-          group.ecosystem,
-          ctx,
-        )),
-      };
-    }),
-  );
-  // One section per lockfile, not one per workspace member reading it.
-  return mergeSharedLockfiles(results, (result) =>
-    lockfiles.get(result.manifestPath),
-  );
-}
-
 function updateStatusBar(item: vscode.StatusBarItem, result: ScanResult): void {
   const { totalDependencies, outdated, vulnerable, auditIncomplete } =
     result.summary;
@@ -524,7 +487,7 @@ function updateStatusBar(item: vscode.StatusBarItem, result: ScanResult): void {
       ? `$(package) ${parts.join(' ')}`
       : `$(package) ${totalDependencies}`;
   const auditNote = auditIncomplete
-    ? ' (vulnerability check incomplete — OSV.dev was not fully reachable)'
+    ? ' (vulnerability check incomplete — some dependencies or OSV results were not checked)'
     : '';
   item.tooltip = `Orizzonte — ${totalDependencies} dependencies, ${outdated} outdated, ${vulnerable} vulnerable${auditNote}`;
   /*

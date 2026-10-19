@@ -166,6 +166,14 @@ export class NodeProvider implements EcosystemProvider {
     const json = (parseJsonc(text, errors, { allowTrailingComma: true }) ??
       {}) as PackageJson;
 
+    if (
+      errors.length > 0 ||
+      !json ||
+      typeof json !== 'object' ||
+      Array.isArray(json)
+    )
+      throw new Error(`Invalid JSON: ${absolutePath}`);
+
     const projectLabel = json.name ?? path.basename(path.dirname(absolutePath));
     const dependencies: Dependency[] = [];
 
@@ -186,8 +194,8 @@ export class NodeProvider implements EcosystemProvider {
         const npmScope = npmScopeOf(registryName ?? name);
         const source =
           (classified.source === 'registry' || classified.source === 'alias') &&
-          npmScope !== undefined &&
-          privateScopes.has(npmScope)
+          ((npmScope !== undefined && privateScopes.has(npmScope)) ||
+            privateScopes.has('*'))
             ? 'private'
             : classified.source;
         dependencies.push({
@@ -236,8 +244,6 @@ export class NodeProvider implements EcosystemProvider {
     manifestPath: string,
     ctx: ProviderContext,
   ): Promise<Set<string>> {
-    if (ctx.registryOverride('node')) return new Set();
-
     const files = [
       ...ancestorDirectories(
         path.dirname(manifestPath),
@@ -418,37 +424,42 @@ export class NodeProvider implements EcosystemProvider {
     const registry = ctx.registryOverride('node') ?? DEFAULT_REGISTRY;
     const key = cacheKey('npm', 'meta', registry, name);
 
-    return fetchMetadataWithCache(key, ctx, async () => {
-      // The full version document, not the abbreviated packument: the
-      // abbreviated form is install-oriented and carries none of the fields we
-      // need here (repository, homepage, description).
-      const version = await ctx.http.getJson<PackumentVersion>(
-        `${registry}/${encodeName(name)}/latest`,
-        { signal, headers: ctx.registryAuthHeaders('node') },
-      );
-      if (!version) return undefined;
+    return fetchMetadataWithCache(
+      key,
+      ctx,
+      async () => {
+        // The full version document, not the abbreviated packument: the
+        // abbreviated form is install-oriented and carries none of the fields we
+        // need here (repository, homepage, description).
+        const version = await ctx.http.getJson<PackumentVersion>(
+          `${registry}/${encodeName(name)}/latest`,
+          { signal, headers: ctx.registryAuthHeaders('node') },
+        );
+        if (!version) return undefined;
 
-      const repository = normalizeRepositoryUrl(
-        typeof version.repository === 'string'
-          ? version.repository
-          : version.repository?.url,
-      );
+        const repository = normalizeRepositoryUrl(
+          typeof version.repository === 'string'
+            ? version.repository
+            : version.repository?.url,
+        );
 
-      return {
-        name,
-        description: version.description,
-        homepage: version.homepage,
-        repository,
-        changelogUrl: changelogUrlFor(repository),
-        sizeBytes: version.dist?.unpackedSize,
-        deprecated: version.deprecated,
-        author:
-          typeof version.author === 'string'
-            ? version.author
-            : version.author?.name,
-        license: licenseFromPackument(version),
-      };
-    });
+        return {
+          name,
+          description: version.description,
+          homepage: version.homepage,
+          repository,
+          changelogUrl: changelogUrlFor(repository),
+          sizeBytes: version.dist?.unpackedSize,
+          deprecated: version.deprecated,
+          author:
+            typeof version.author === 'string'
+              ? version.author
+              : version.author?.name,
+          license: licenseFromPackument(version),
+        };
+      },
+      this.id,
+    );
   }
 
   async search(

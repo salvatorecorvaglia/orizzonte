@@ -6,6 +6,10 @@ export default defineConfig({
   // `out/tests/integration/`. A glob that matches nothing makes Mocha report
   // "0 passing" and exit 0 — a green CI job that ran no tests at all.
   files: 'out/tests/integration/**/*.test.js',
+  version: process.env.ORIZZONTE_VSCODE_VERSION ?? 'stable',
+  ...(process.env.ORIZZONTE_VSCODE_EXECUTABLE
+    ? { useInstallation: { fromPath: process.env.ORIZZONTE_VSCODE_EXECUTABLE } }
+    : {}),
   mocha: {
     ui: 'bdd',
     /*

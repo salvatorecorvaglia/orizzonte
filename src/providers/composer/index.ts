@@ -6,7 +6,7 @@
  */
 
 import * as path from 'node:path';
-import { parse as parseJsonc } from 'jsonc-parser';
+import { type ParseError, parse as parseJsonc } from 'jsonc-parser';
 import { cacheKey } from '../../core/cache.js';
 import { readInstalledVersions } from '../../core/lockfiles/installed.js';
 import type {
@@ -97,14 +97,27 @@ export class ComposerProvider implements EcosystemProvider {
     text: string,
     _ctx: ProviderContext,
   ): Promise<ParsedManifest> {
-    const json = (parseJsonc(text) ?? {}) as {
+    const errors: ParseError[] = [];
+    const json = (parseJsonc(text, errors) ?? {}) as {
       name?: string;
       require?: Record<string, string>;
       'require-dev'?: Record<string, string>;
+      repositories?: unknown[] | Record<string, unknown>;
     };
 
+    if (
+      errors.length > 0 ||
+      !json ||
+      typeof json !== 'object' ||
+      Array.isArray(json)
+    )
+      throw new Error(`Invalid JSON: ${absolutePath}`);
     const projectLabel = json.name ?? path.basename(path.dirname(absolutePath));
     const dependencies: Dependency[] = [];
+    // A custom repository may provide any declared package; avoid sending its names to Packagist/OSV.
+    const customRepositories = Object.values(json.repositories ?? {}).some(
+      (entry) => entry && typeof entry === 'object',
+    );
 
     const buckets: Array<[Record<string, string> | undefined, DepScope]> = [
       [json.require, 'prod'],
@@ -113,11 +126,13 @@ export class ComposerProvider implements EcosystemProvider {
 
     for (const [record, scope] of buckets) {
       for (const [name, declared] of Object.entries(record ?? {})) {
-        if (isPlatformRequirement(name)) continue;
+        if (isPlatformRequirement(name) || typeof declared !== 'string')
+          continue;
         dependencies.push({
           key: dependencyKey(absolutePath, scope, name),
           name,
           ecosystem: 'composer',
+          ...(customRepositories ? { source: 'private' as const } : {}),
           scope,
           declared,
           updateKind: 'unknown',
@@ -222,33 +237,38 @@ export class ComposerProvider implements EcosystemProvider {
       name,
     );
 
-    return fetchMetadataWithCache(key, ctx, async () => {
-      const repo = ctx.registryOverride('composer') ?? DEFAULT_REPO;
-      const response = await ctx.http.getJson<P2Response>(
-        `${repo}/p2/${encodePackageName(name)}.json`,
-        { signal, headers: ctx.registryAuthHeaders('composer') },
-      );
-      const latest = response.packages[name]?.[0];
-      if (!latest) return undefined;
+    return fetchMetadataWithCache(
+      key,
+      ctx,
+      async () => {
+        const repo = ctx.registryOverride('composer') ?? DEFAULT_REPO;
+        const response = await ctx.http.getJson<P2Response>(
+          `${repo}/p2/${encodePackageName(name)}.json`,
+          { signal, headers: ctx.registryAuthHeaders('composer') },
+        );
+        const latest = response.packages[name]?.[0];
+        if (!latest) return undefined;
 
-      const repository = normalizeRepositoryUrl(latest.source?.url);
-      return {
-        name,
-        description: latest.description,
-        homepage: latest.homepage,
-        repository,
-        changelogUrl: changelogUrlFor(repository),
-        deprecated:
-          latest.abandoned === undefined || latest.abandoned === false
-            ? undefined
-            : typeof latest.abandoned === 'string'
-              ? `Abandoned — use ${latest.abandoned} instead`
-              : 'This package is abandoned',
-        license: latest.license?.length
-          ? latest.license.join(' OR ')
-          : undefined,
-      };
-    });
+        const repository = normalizeRepositoryUrl(latest.source?.url);
+        return {
+          name,
+          description: latest.description,
+          homepage: latest.homepage,
+          repository,
+          changelogUrl: changelogUrlFor(repository),
+          deprecated:
+            latest.abandoned === undefined || latest.abandoned === false
+              ? undefined
+              : typeof latest.abandoned === 'string'
+                ? `Abandoned — use ${latest.abandoned} instead`
+                : 'This package is abandoned',
+          license: latest.license?.length
+            ? latest.license.join(' OR ')
+            : undefined,
+        };
+      },
+      this.id,
+    );
   }
 
   async search(

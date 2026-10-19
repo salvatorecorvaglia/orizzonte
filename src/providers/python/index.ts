@@ -12,13 +12,14 @@
 
 import * as path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import { cacheKey, TTL } from '../../core/cache.js';
+import { cacheKey, credentialCacheKey, TTL } from '../../core/cache.js';
 import { readInstalledVersions } from '../../core/lockfiles/installed.js';
 import { ancestorDirectories } from '../../core/lockfiles/resolve.js';
 import { normalizeName } from '../../core/pep503.js';
 import type {
   Dependency,
   DependencyGroup,
+  DependencySource,
   DepScope,
   PackageMeta,
   ParsedManifest,
@@ -134,8 +135,7 @@ export class PythonProvider implements EcosystemProvider {
     try {
       doc = parseToml(text) as Record<string, unknown>;
     } catch {
-      // Malformed TOML still gives us a manifest, just an empty one.
-      return emptyManifest(absolutePath);
+      throw new Error(`Invalid TOML: ${absolutePath}`);
     }
 
     const project = doc.project as Record<string, unknown> | undefined;
@@ -159,9 +159,13 @@ export class PythonProvider implements EcosystemProvider {
       declared: string,
       scope: DepScope,
       group?: DependencyGroup,
+      source?: DependencySource,
     ) => {
       if (!name) return;
-      const key = dependencyKey(absolutePath, scope, normalizeName(name));
+      const identity = group
+        ? `${normalizeName(name)}::${group.kind}::${group.name}`
+        : normalizeName(name);
+      const key = dependencyKey(absolutePath, scope, identity);
       if (seen.has(key)) return;
       seen.add(key);
 
@@ -179,6 +183,12 @@ export class PythonProvider implements EcosystemProvider {
         // and `poetry remove` have to be told which group to edit, and
         // `test`, `lint` and `docs` all collapse onto the same scope.
         ...(group ? { group } : {}),
+        ...((source ?? requirementSource(declared) ?? uvSource(doc, name))
+          ? {
+              source:
+                source ?? requirementSource(declared) ?? uvSource(doc, name),
+            }
+          : {}),
       });
     };
 
@@ -227,7 +237,13 @@ export class PythonProvider implements EcosystemProvider {
       | undefined;
     for (const [name, value] of Object.entries(poetryDeps ?? {})) {
       if (name.toLowerCase() === 'python') continue; // the interpreter, not a package
-      add(name, poetryConstraint(value), 'prod');
+      add(
+        name,
+        poetryConstraint(value),
+        'prod',
+        undefined,
+        poetrySource(value),
+      );
     }
     const poetryGroups = poetry?.group as
       | Record<string, { dependencies?: Record<string, unknown> }>
@@ -235,10 +251,16 @@ export class PythonProvider implements EcosystemProvider {
     for (const [group, body] of Object.entries(poetryGroups ?? {})) {
       const scope = normalizeScope(group);
       for (const [name, value] of Object.entries(body.dependencies ?? {})) {
-        add(name, poetryConstraint(value), scope, {
-          kind: 'group',
-          name: group,
-        });
+        add(
+          name,
+          poetryConstraint(value),
+          scope,
+          {
+            kind: 'group',
+            name: group,
+          },
+          poetrySource(value),
+        );
       }
     }
     // Poetry's pre-1.2 dev group.
@@ -246,7 +268,13 @@ export class PythonProvider implements EcosystemProvider {
       | Record<string, unknown>
       | undefined;
     for (const [name, value] of Object.entries(legacyDev ?? {})) {
-      add(name, poetryConstraint(value), 'dev', { kind: 'group', name: 'dev' });
+      add(
+        name,
+        poetryConstraint(value),
+        'dev',
+        { kind: 'group', name: 'dev' },
+        poetrySource(value),
+      );
     }
 
     // uv workspace members.
@@ -274,6 +302,7 @@ export class PythonProvider implements EcosystemProvider {
       ? 'dev'
       : 'prod';
     const dependencies: Dependency[] = [];
+    const seen = new Set<string>();
 
     for (const { text: logical } of logicalLines(text.split(/\r?\n/))) {
       const line = requirementPart(logical);
@@ -291,12 +320,25 @@ export class PythonProvider implements EcosystemProvider {
       const parsed = parseRequirement(line);
       if (!parsed) continue;
 
+      const marker = line.includes(';')
+        ? `::${line.slice(line.indexOf(';') + 1).trim()}`
+        : '';
+      const key = dependencyKey(
+        absolutePath,
+        scope,
+        `${normalizeName(parsed.name)}${marker}`,
+      );
+      if (seen.has(key)) continue;
+      seen.add(key);
       dependencies.push({
-        key: dependencyKey(absolutePath, scope, parsed.name),
+        key,
         name: parsed.name,
         ecosystem: 'python',
         scope,
         declared: parsed.specifier,
+        ...(requirementSource(parsed.specifier)
+          ? { source: requirementSource(parsed.specifier) }
+          : {}),
         updateKind: 'unknown',
         vulnerabilities: [],
         manifestPath: absolutePath,
@@ -461,39 +503,44 @@ export class PythonProvider implements EcosystemProvider {
     const index = ctx.registryOverride('python') ?? DEFAULT_INDEX;
     const key = cacheKey('pypi', 'meta', index, name);
 
-    return fetchMetadataWithCache(key, ctx, async () => {
-      const response = await ctx.http.getJson<PyPiResponse>(
-        `${index}/pypi/${encodeURIComponent(name)}/json`,
-        { signal, headers: ctx.registryAuthHeaders('python') },
-      );
-      const urls = response.info.project_urls ?? {};
-      const repository = normalizeRepositoryUrl(
-        urls.Source ??
-          urls.Repository ??
-          urls['Source Code'] ??
-          urls.Homepage ??
-          response.info.home_page,
-      );
-      // Prefer the wheel's size; sdists are misleadingly large.
-      const wheel = response.urls?.find(
-        (entry) => entry.packagetype === 'bdist_wheel',
-      );
+    return fetchMetadataWithCache(
+      key,
+      ctx,
+      async () => {
+        const response = await ctx.http.getJson<PyPiResponse>(
+          `${index}/pypi/${encodeURIComponent(name)}/json`,
+          { signal, headers: ctx.registryAuthHeaders('python') },
+        );
+        const urls = response.info.project_urls ?? {};
+        const repository = normalizeRepositoryUrl(
+          urls.Source ??
+            urls.Repository ??
+            urls['Source Code'] ??
+            urls.Homepage ??
+            response.info.home_page,
+        );
+        // Prefer the wheel's size; sdists are misleadingly large.
+        const wheel = response.urls?.find(
+          (entry) => entry.packagetype === 'bdist_wheel',
+        );
 
-      return {
-        name: response.info.name,
-        description: response.info.summary,
-        homepage: response.info.home_page,
-        repository,
-        changelogUrl:
-          urls.Changelog ?? urls.Changes ?? changelogUrlFor(repository),
-        sizeBytes: wheel?.size ?? response.urls?.[0]?.size,
-        deprecated: response.info.yanked
-          ? `Yanked from PyPI${response.info.yanked_reason ? `: ${response.info.yanked_reason}` : ''}`
-          : undefined,
-        author: response.info.author,
-        license: licenseFromPyPi(response.info),
-      };
-    });
+        return {
+          name: response.info.name,
+          description: response.info.summary,
+          homepage: response.info.home_page,
+          repository,
+          changelogUrl:
+            urls.Changelog ?? urls.Changes ?? changelogUrlFor(repository),
+          sizeBytes: wheel?.size ?? response.urls?.[0]?.size,
+          deprecated: response.info.yanked
+            ? `Yanked from PyPI${response.info.yanked_reason ? `: ${response.info.yanked_reason}` : ''}`
+            : undefined,
+          author: response.info.author,
+          license: licenseFromPyPi(response.info),
+        };
+      },
+      this.id,
+    );
   }
 
   /**
@@ -567,7 +614,10 @@ export class PythonProvider implements EcosystemProvider {
     ctx: ProviderContext,
     signal?: AbortSignal,
   ): Promise<string> {
-    const key = cacheKey('pypi', 'index', index);
+    const key = credentialCacheKey(
+      cacheKey('pypi', 'index', index),
+      ctx.registryAuthHeaders('python'),
+    );
     const cached = ctx.cache.get<string>(key);
     if (cached !== undefined) return cached;
 
@@ -741,6 +791,7 @@ export class PythonProvider implements EcosystemProvider {
         // truth. It is named from the manifest rather than assumed, so a
         // project driven by `requirements-dev.txt` does not silently reinstall
         // a `requirements.txt` that may not even exist.
+        if (toolchain.manifestFile === 'pyproject.toml') return null;
         const requirements = toolchain.manifestFile ?? 'requirements.txt';
         return {
           argv: [
@@ -995,13 +1046,37 @@ function poetryConstraint(value: unknown): string {
   return '*';
 }
 
-function emptyManifest(absolutePath: string): ParsedManifest {
-  return {
-    ecosystem: 'python',
-    path: absolutePath,
-    name: path.basename(path.dirname(absolutePath)),
-    dependencies: [],
-  };
+function requirementSource(specifier: string): DependencySource | undefined {
+  if (!specifier.trim().startsWith('@')) return undefined;
+  const target = specifier.trim().slice(1).trim();
+  if (/^(?:git|hg|svn|bzr)\+/.test(target)) return 'git';
+  if (/^(?:file:|\.{0,2}\/)/.test(target)) return 'path';
+  return 'url';
+}
+
+function poetrySource(value: unknown): DependencySource | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const entry = value as Record<string, unknown>;
+  if (entry.path !== undefined) return 'path';
+  if (entry.git !== undefined) return 'git';
+  if (entry.url !== undefined) return 'url';
+  if (entry.source !== undefined) return 'private';
+  return undefined;
+}
+
+function uvSource(
+  doc: Record<string, unknown>,
+  name: string,
+): DependencySource | undefined {
+  const tool = doc.tool as
+    | { uv?: { sources?: Record<string, unknown> } }
+    | undefined;
+  const entry = tool?.uv?.sources?.[name];
+  if (Array.isArray(entry)) return 'private';
+  if (!entry || typeof entry !== 'object') return undefined;
+  if ('workspace' in entry) return 'workspace';
+  if ('index' in entry) return 'private';
+  return poetrySource(entry);
 }
 
 /**

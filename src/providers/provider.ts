@@ -64,6 +64,7 @@ export interface VersionInfo {
   deprecated?: string;
   /** Unpacked size or package size in bytes for the latest version. */
   sizeBytes?: number;
+  stale?: boolean;
 }
 
 /** A command to run, expressed as argv so nothing is shell-interpolated. */
@@ -243,7 +244,13 @@ export interface EcosystemProvider {
     manifestText: string,
     edit:
       | { kind: 'add'; name: string; version: string | null; scope: DepScope }
-      | { kind: 'update'; name: string; version: string; scope: DepScope }
+      | {
+          kind: 'update';
+          name: string;
+          version: string;
+          scope: DepScope;
+          declaration?: string;
+        }
       | { kind: 'remove'; name: string; scope: DepScope },
     manifestFile?: string,
   ): string | null;

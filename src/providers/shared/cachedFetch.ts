@@ -10,13 +10,9 @@
  * that talk to a different registry each.
  */
 
-import { TTL } from '../../core/cache.js';
+import { credentialCacheKey, TTL } from '../../core/cache.js';
+import { isAbortError } from '../../core/errors.js';
 import type { Ecosystem, PackageMeta } from '../../core/types.js';
-import {
-  compareVersions,
-  isPrerelease,
-  maxVersion,
-} from '../../core/versions/index.js';
 import type { ProviderContext, VersionInfo } from '../provider.js';
 import { mapWithConcurrency } from './concurrency.js';
 
@@ -36,7 +32,10 @@ export async function fetchVersionsWithCache(
   await mapWithConcurrency(names, concurrency, async (name) => {
     if (isValidName && !isValidName(name)) return;
 
-    const key = cacheKeyFor(name);
+    const key = credentialCacheKey(
+      cacheKeyFor(name),
+      ecosystem ? ctx.registryAuthHeaders(ecosystem) : undefined,
+    );
     const cached = ctx.cache.get<VersionInfo>(key);
     if (cached) {
       result.set(name, cached);
@@ -52,48 +51,22 @@ export async function fetchVersionsWithCache(
         ecosystem ? compactVersionInfo(ecosystem, info) : info,
         TTL.version,
       );
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) throw error;
       const stale = ctx.cache.getStale<VersionInfo>(key);
-      if (stale) result.set(name, stale);
+      if (stale) result.set(name, { ...stale, stale: true });
     }
   });
 
   return result;
 }
 
-/**
- * A version list trimmed for storage: every stable release, plus only the
- * prereleases newer than the latest stable one.
- *
- * The cache persists to `globalState`, which VS Code loads synchronously at
- * every extension-host start, and a few packages dominate it: `next` and
- * `typescript` publish a canary or a nightly almost daily, so their lists run
- * to thousands of entries — nearly all of them prereleases of versions that
- * have long since shipped. Nothing here reads those: `latest` and the update
- * badge are stable releases, and a range matches a prerelease only of the
- * version it names. The scan that fetched the list still sees all of it; only
- * the copy kept for later is trimmed.
- */
+/** Keep every distinct version: even old prereleases may satisfy an explicit pin. */
 export function compactVersionInfo(
-  ecosystem: Ecosystem,
+  _ecosystem: Ecosystem,
   info: VersionInfo,
 ): VersionInfo {
-  const stable = info.versions.filter(
-    (version) => !isPrerelease(ecosystem, version),
-  );
-  if (stable.length === 0 || stable.length === info.versions.length) {
-    return info;
-  }
-  const newestStable = maxVersion(ecosystem, stable);
-  if (newestStable === undefined) return info;
-  return {
-    ...info,
-    versions: info.versions.filter(
-      (version) =>
-        !isPrerelease(ecosystem, version) ||
-        compareVersions(ecosystem, version, newestStable) > 0,
-    ),
-  };
+  return { ...info, versions: [...new Set(info.versions)] };
 }
 
 /**
@@ -108,7 +81,12 @@ export async function fetchMetadataWithCache(
   key: string,
   ctx: ProviderContext,
   fetchOne: () => Promise<PackageMeta | undefined>,
+  ecosystem?: Ecosystem,
 ): Promise<PackageMeta | undefined> {
+  key = credentialCacheKey(
+    key,
+    ecosystem ? ctx.registryAuthHeaders(ecosystem) : undefined,
+  );
   const cached = ctx.cache.get<PackageMeta>(key);
   if (cached) return cached;
 
@@ -117,7 +95,8 @@ export async function fetchMetadataWithCache(
     if (meta === undefined) return undefined;
     await ctx.cache.set(key, meta, TTL.metadata);
     return meta;
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) throw error;
     return ctx.cache.getStale<PackageMeta>(key);
   }
 }

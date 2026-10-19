@@ -86,12 +86,7 @@ export class CargoProvider implements EcosystemProvider {
     try {
       doc = parseToml(text) as Record<string, unknown>;
     } catch {
-      return {
-        ecosystem: 'cargo',
-        path: absolutePath,
-        name: path.basename(path.dirname(absolutePath)),
-        dependencies: [],
-      };
+      throw new Error(`Invalid TOML: ${absolutePath}`);
     }
 
     const pkg = doc.package as { name?: string } | undefined;
@@ -124,12 +119,16 @@ export class CargoProvider implements EcosystemProvider {
           // `workspace = true` is a real crate whose version the workspace
           // root owns: worth looking up, not rewritable from the member —
           // `cargo add foo@2` there replaces the inheritance with a pin.
+          ...(value && typeof value === 'object' && 'registry' in value
+            ? { source: 'private' as const }
+            : {}),
           ...(declared === 'workspace' ? { source: 'inherited' as const } : {}),
           // `foo = { package = "bar" }` is the crate `bar`, used as `foo`.
           ...(registryName
             ? {
                 registryName,
-                ...(declared === 'workspace'
+                ...(declared === 'workspace' ||
+                (value && typeof value === 'object' && 'registry' in value)
                   ? {}
                   : { source: 'alias' as const }),
               }
@@ -279,25 +278,30 @@ export class CargoProvider implements EcosystemProvider {
     const registry = ctx.registryOverride('cargo') ?? DEFAULT_REGISTRY;
     const key = cacheKey('crates', 'meta', registry, name);
 
-    return fetchMetadataWithCache(key, ctx, async () => {
-      const response = await ctx.http.getJson<CrateResponse>(
-        `${registry}/api/v1/crates/${encodeURIComponent(name)}`,
-        { signal, headers: ctx.registryAuthHeaders('cargo') },
-      );
-      const newest = response.versions?.[0];
-      const repository = normalizeRepositoryUrl(response.crate.repository);
+    return fetchMetadataWithCache(
+      key,
+      ctx,
+      async () => {
+        const response = await ctx.http.getJson<CrateResponse>(
+          `${registry}/api/v1/crates/${encodeURIComponent(name)}`,
+          { signal, headers: ctx.registryAuthHeaders('cargo') },
+        );
+        const newest = response.versions?.[0];
+        const repository = normalizeRepositoryUrl(response.crate.repository);
 
-      return {
-        name: response.crate.name,
-        description: response.crate.description,
-        homepage: response.crate.homepage ?? response.crate.documentation,
-        repository,
-        changelogUrl: changelogUrlFor(repository),
-        sizeBytes: newest?.crate_size,
-        downloads: response.crate.downloads,
-        license: newest?.license,
-      };
-    });
+        return {
+          name: response.crate.name,
+          description: response.crate.description,
+          homepage: response.crate.homepage ?? response.crate.documentation,
+          repository,
+          changelogUrl: changelogUrlFor(repository),
+          sizeBytes: newest?.crate_size,
+          downloads: response.crate.downloads,
+          license: newest?.license,
+        };
+      },
+      this.id,
+    );
   }
 
   async search(

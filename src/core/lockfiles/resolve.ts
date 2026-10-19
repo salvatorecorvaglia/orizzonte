@@ -116,14 +116,25 @@ export async function selectLockfile<T extends { file: string }, R>(
       // A remembered miss matters as much as a remembered hit: every member of
       // a workspace walks through the same empty directories on its way up.
       if (memoKey !== undefined && memo?.store.has(memoKey)) {
-        const cached = memo.store.get(memoKey) as R | undefined;
+        const cached = await (memo.store.get(memoKey) as
+          | R
+          | Promise<R | undefined>
+          | undefined);
         if (cached !== undefined) return cached;
         continue;
       }
 
-      const text = await read(absolutePath);
-      const selected = text ? select(candidate, text, absolutePath) : undefined;
-      if (memoKey !== undefined) memo?.store.set(memoKey, selected);
+      const pending = read(absolutePath).then((text) =>
+        text ? select(candidate, text, absolutePath) : undefined,
+      );
+      if (memoKey !== undefined) memo?.store.set(memoKey, pending);
+      let selected: R | undefined;
+      try {
+        selected = await pending;
+      } catch (error) {
+        if (memoKey !== undefined) memo?.store.delete(memoKey);
+        throw error;
+      }
       if (selected !== undefined) return selected;
     }
 

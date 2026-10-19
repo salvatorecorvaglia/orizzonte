@@ -23,7 +23,9 @@ describe('TerminalRunner', () => {
   let runner: TerminalRunner;
 
   beforeEach(() => {
-    runner = new TerminalRunner();
+    // Native shell integration may not report an end event on a headless
+    // host. Exercise the real bounded fallback without waiting ten minutes.
+    runner = new TerminalRunner(10_000);
   });
 
   afterEach(() => {
@@ -54,12 +56,23 @@ describe('TerminalRunner', () => {
   });
 
   it('reuses the same terminal for a second command in the same cwd', async () => {
-    await runner.run({
+    const firstRun = await runner.run({
       argv: ['echo', 'first'],
       cwd: process.cwd(),
       description: 'test echo',
     });
     const first = orizzonteTerminals()[0];
+    if (firstRun.exitCode === undefined) {
+      await assert.rejects(
+        runner.run({
+          argv: ['echo', 'second'],
+          cwd: process.cwd(),
+          description: 'second',
+        }),
+        /previous command/,
+      );
+      return;
+    }
 
     await runner.run({
       argv: ['echo', 'second'],
@@ -82,6 +95,18 @@ describe('TerminalRunner', () => {
       description: 'test echo',
     });
     const first = orizzonteTerminals()[0];
+    if (firstRun.exitCode === undefined) {
+      await assert.rejects(
+        runner.run({
+          argv: ['echo', 'second'],
+          cwd: os.tmpdir(),
+          description: 'second',
+        }),
+        /previous command/,
+      );
+      assert.ok(orizzonteTerminals().includes(first));
+      return;
+    }
 
     await runner.run({
       argv: ['echo', 'second'],

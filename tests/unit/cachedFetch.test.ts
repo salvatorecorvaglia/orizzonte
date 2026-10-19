@@ -65,7 +65,7 @@ describe('fetchVersionsWithCache', () => {
       },
     );
 
-    expect(result.get('react')).toEqual(info('18.0.0'));
+    expect(result.get('react')).toEqual({ ...info('18.0.0'), stale: true });
   });
 
   it('omits a package that fails with nothing cached', async () => {

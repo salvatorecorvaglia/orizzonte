@@ -66,7 +66,15 @@ export function providerForPath(
  * from the providers.
  */
 export function allWatchedFileNames(): string[] {
-  const names = new Set<string>();
+  const names = new Set<string>([
+    '.gitignore',
+    '.npmrc',
+    'pnpm-workspace.yaml',
+    'go.work',
+    'settings.gradle',
+    'settings.gradle.kts',
+    '.yarnrc.yml',
+  ]);
   for (const provider of PROVIDERS) {
     for (const file of provider.manifestFiles) names.add(file);
     for (const glob of provider.manifestGlobs ?? []) names.add(glob);

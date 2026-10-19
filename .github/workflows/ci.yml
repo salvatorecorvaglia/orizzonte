@@ -10,6 +10,7 @@ on:
     paths-ignore:
       - '**.md'
   workflow_dispatch:
+  workflow_call:
   schedule:
     - cron: '17 6 * * 1'
 
@@ -17,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -62,7 +63,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -88,12 +89,15 @@ jobs:
         run: pnpm test
 
   integration-test:
-    name: Integration Tests (${{ matrix.os }})
+    name: Integration Tests (${{ matrix.os }}, ${{ matrix.vscode }})
     runs-on: ${{ matrix.os }}
+    env:
+      ORIZZONTE_VSCODE_VERSION: ${{ matrix.vscode }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+        vscode: ['1.107.0', stable]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -114,15 +118,15 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .vscode-test
-          key: vscode-test-${{ runner.os }}-${{ hashFiles('package.json') }}
-          restore-keys: vscode-test-${{ runner.os }}-
+          key: vscode-test-${{ runner.os }}-${{ matrix.vscode }}-${{ hashFiles('package.json') }}
+          restore-keys: vscode-test-${{ runner.os }}-${{ matrix.vscode }}-
 
       - name: Run VS Code integration tests (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a pnpm run test:integration
 
-      - name: Run VS Code integration tests (Windows)
-        if: runner.os == 'Windows'
+      - name: Run VS Code integration tests (Windows/macOS)
+        if: runner.os != 'Linux'
         run: pnpm run test:integration
 
   package:
@@ -186,3 +190,17 @@ jobs:
 
       - name: Audit dependencies
         run: pnpm audit --audit-level moderate
+
+  browser-test:
+    name: Webview Browser Smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm run test:browser

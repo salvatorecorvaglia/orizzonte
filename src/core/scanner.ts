@@ -17,6 +17,8 @@ import {
 } from '../providers/registry.js';
 import { mapWithConcurrency } from '../providers/shared/concurrency.js';
 import { auditDependencies } from './audit.js';
+import { ManifestIgnore } from './manifestIgnore.js';
+import { canLookupDependency } from './registryAccess.js';
 import type {
   Dependency,
   Ecosystem,
@@ -33,7 +35,7 @@ import {
   maxVersion,
   registryConstraint,
 } from './versions/index.js';
-import { isRegistryPackage, registryNameOf } from './vocabulary.js';
+import { hasUpdate, isRegistryPackage, registryNameOf } from './vocabulary.js';
 import { assignWorkspaces, readSidecarMembers } from './workspaces.js';
 
 export interface ScanResult {
@@ -189,7 +191,11 @@ export class Scanner {
       groups,
       manifestPaths,
       manifests,
-      summary: summarize(groups, false),
+      summary: {
+        ...summarize(groups, false),
+        auditStatus: 'notRun',
+        auditScope: 'declared',
+      },
     };
     onPartial?.(partial);
 
@@ -199,11 +205,13 @@ export class Scanner {
 
     let stale = false;
     let auditIncomplete = false;
+    let auditSkipped = 0;
     try {
       // Only a total failure means "stale". One unreachable registry should
       // grey out its own ecosystem's rows, not relabel results that arrived
       // perfectly well from the other six.
       stale = await this.enrichVersions(groups, signal);
+      signal.throwIfAborted();
 
       // Deliberately outside the version-lookup outcome: advisories come from
       // OSV, not from the registries, so a registry being down is no reason to
@@ -211,10 +219,12 @@ export class Scanner {
       if (options.audit) {
         const outcome = await auditDependencies(groups, this.ctx, signal);
         auditIncomplete = !outcome.complete;
+        auditSkipped = outcome.skipped ?? 0;
       }
     } catch (error) {
       if (signal.aborted) throw error;
       stale = true;
+      auditIncomplete = options.audit;
     }
 
     const summary = summarize(groups, stale);
@@ -222,7 +232,17 @@ export class Scanner {
       groups,
       manifestPaths,
       manifests,
-      summary: auditIncomplete ? { ...summary, auditIncomplete } : summary,
+      summary: {
+        ...summary,
+        auditIncomplete,
+        auditStatus: options.audit
+          ? auditIncomplete
+            ? 'partial'
+            : 'complete'
+          : 'notRun',
+        auditScope: 'declared',
+        auditSkipped,
+      },
     };
   }
 
@@ -239,18 +259,29 @@ export class Scanner {
       ...vscode.workspace
         .getConfiguration('orizzonte')
         .get<string[]>('excludeGlobs', []),
-      ...(await this.gitignoreExcludes()),
     ];
     const excludePattern =
       excludes.length > 0 ? `{${excludes.join(',')}}` : undefined;
 
     this.unreadable = [];
-    const uris = await vscode.workspace.findFiles(
+    const discovered = await vscode.workspace.findFiles(
       manifestGlob(),
       excludePattern,
       MAX_MANIFESTS,
     );
-    this.truncated = uris.length >= MAX_MANIFESTS;
+    this.truncated = discovered.length >= MAX_MANIFESTS;
+    const ignoreRules = new ManifestIgnore((file) => ctx.readFile(file));
+    const accepted = await mapWithConcurrency(
+      discovered,
+      MANIFEST_CONCURRENCY,
+      async (uri) => {
+        const root = ctx.workspaceRootFor(uri.fsPath);
+        return !root || !(await ignoreRules.ignores(root, uri.fsPath))
+          ? uri
+          : undefined;
+      },
+    );
+    const uris = accepted.filter((uri): uri is vscode.Uri => uri !== undefined);
 
     /*
      * Read and parse manifests a few at a time rather than strictly one after
@@ -409,55 +440,6 @@ export class Scanner {
   }
 
   /**
-   * Turns each workspace folder's `.gitignore` into exclude globs.
-   *
-   * `findFiles` does not consult `.gitignore` — only `files.exclude` and the
-   * pattern we pass — so a vendored or generated tree would otherwise be
-   * scanned and show up as a project the user does not own.
-   *
-   * Only directory-shaped, non-negated entries are translated; the full
-   * gitignore grammar (negations, anchoring, character classes) is more than a
-   * scan filter needs, and over-excluding would hide real manifests.
-   */
-  private async gitignoreExcludes(): Promise<string[]> {
-    const folders = vscode.workspace.workspaceFolders ?? [];
-    const globs = new Set<string>();
-
-    for (const folder of folders) {
-      const text = await this.ctx.readFile(
-        path.join(folder.uri.fsPath, '.gitignore'),
-      );
-      if (!text) continue;
-
-      for (const rawLine of text.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (line === '' || line.startsWith('#')) continue;
-        // A negation re-includes a path; honouring it would need full gitignore
-        // semantics, so we skip the rule rather than get it subtly wrong.
-        if (line.startsWith('!')) continue;
-        // Anything with a glob or character class is left to git.
-        if (/[*?[\]]/.test(line)) continue;
-        /*
-         * `,`, `{` and `}` are structural in the brace pattern these entries
-         * are joined into below, not in gitignore's own grammar — a directory
-         * legitimately named `a,b` would split the group and corrupt every
-         * other exclude alongside it. There is nothing to escape them with, so
-         * the entry is dropped: one directory scanned that need not be, rather
-         * than an exclude list that silently stops working.
-         */
-        if (/[,{}]/.test(line)) continue;
-
-        const cleaned = line.replace(/^\/+/, '').replace(/\/+$/, '');
-        if (cleaned === '' || cleaned.includes('..')) continue;
-
-        globs.add(`**/${cleaned}/**`);
-      }
-    }
-
-    return [...globs];
-  }
-
-  /**
    * Marks each group as a workspace root or a member of one, so the UI can say
    * where a package sits rather than showing a flat list of unrelated projects.
    */
@@ -512,7 +494,7 @@ export class Scanner {
       for (const dep of group.dependencies) {
         // A workspace sibling, local path or git checkout shares a name with
         // whatever the public registry holds under it, and nothing else.
-        if (!isRegistryPackage(dep)) continue;
+        if (!canLookupDependency(dep, this.ctx)) continue;
         const existing = byEcosystem.get(dep.ecosystem);
         if (existing) existing.push(dep);
         else byEcosystem.set(dep.ecosystem, [dep]);
@@ -540,7 +522,10 @@ export class Scanner {
         }
 
         this.applyVersions(dependencies, ecosystem, versions);
-        return true;
+        return dependencies.some((dep) => {
+          const info = versions.get(registryNameOf(dep));
+          return info && info.versions.length > 0 && !info.stale;
+        });
       }),
     );
 
@@ -561,6 +546,7 @@ export class Scanner {
       }
 
       dep.latest = info.latest ?? maxVersion(ecosystem, info.versions);
+      dep.lookupFailed = info.stale || undefined;
       dep.wanted =
         maxSatisfying(
           ecosystem,
@@ -587,6 +573,7 @@ export class Scanner {
 
   /** Fetches rich metadata for a single package, on demand from the drawer. */
   async fetchDetails(dep: Dependency, signal?: AbortSignal) {
+    if (!canLookupDependency(dep, this.ctx)) return undefined;
     const provider = providerFor(dep.ecosystem);
     return provider.fetchMetadata(registryNameOf(dep), this.ctx, signal);
   }
@@ -639,10 +626,7 @@ function summarize(groups: ProjectGroup[], stale: boolean): ScanSummary {
   for (const group of groups) {
     for (const dep of group.dependencies) {
       total++;
-      const isOutdated =
-        dep.updateKind === 'patch' ||
-        dep.updateKind === 'minor' ||
-        dep.updateKind === 'major';
+      const isOutdated = hasUpdate(dep);
       if (isOutdated) {
         outdated++;
       }

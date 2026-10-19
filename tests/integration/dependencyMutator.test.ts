@@ -106,7 +106,7 @@ describe('DependencyMutator', () => {
       provider,
       '33.1.0-jre',
     );
-    assert.equal(applied, true);
+    assert.equal(applied, 'applied');
     assert.deepEqual(failures, []);
 
     const onDisk = await fs.readFile(pomPath, 'utf8');
@@ -133,7 +133,7 @@ describe('DependencyMutator', () => {
         provider,
         '33.1.0-jre',
       );
-      assert.equal(applied, true);
+      assert.equal(applied, 'applied');
 
       // The live buffer carries both changes...
       assert.match(document.getText(), /33\.1\.0-jre/);
@@ -169,6 +169,6 @@ describe('DependencyMutator', () => {
       '33.1.0-jre',
       'prod',
     );
-    assert.equal(applied, false);
+    assert.equal(applied, 'unsupported');
   });
 });

@@ -74,7 +74,13 @@ export interface DependencyGroup {
 }
 
 /** How far behind a dependency is. `none` means it is current. */
-export type UpdateKind = 'none' | 'patch' | 'minor' | 'major' | 'unknown';
+export type UpdateKind =
+  | 'none'
+  | 'patch'
+  | 'minor'
+  | 'major'
+  | 'release'
+  | 'unknown';
 
 export type Severity = 'low' | 'moderate' | 'high' | 'critical';
 
@@ -195,6 +201,8 @@ export interface Dependency {
   registryName?: string;
   /** The named group or extra declaring it, where the ecosystem has them. */
   group?: DependencyGroup;
+  /** Provider-owned declaration identity, such as a Gradle configuration or catalog alias. */
+  declaration?: string;
 }
 
 export interface ParsedManifest {
@@ -351,4 +359,7 @@ export interface ScanSummary {
    * `vulnerable` is a lower bound rather than a clean bill of health.
    */
   auditIncomplete?: boolean;
+  auditStatus?: 'notRun' | 'complete' | 'partial';
+  auditScope?: 'declared';
+  auditSkipped?: number;
 }

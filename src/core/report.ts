@@ -59,12 +59,22 @@ function buildMarkdownReport(
     `- ${summary.vulnerable} vulnerable`,
     `- ${summary.deprecated} deprecated`,
   );
+  if (summary.auditStatus === 'notRun')
+    lines.push('- Vulnerability audit was not run');
+  if (summary.auditScope === 'declared')
+    lines.push(
+      '- Audit scope: declared dependencies at known resolved versions, not the complete transitive inventory',
+    );
+  if (summary.auditSkipped)
+    lines.push(
+      `- ${summary.auditSkipped} dependency declaration(s) were not audited`,
+    );
   if (summary.stale) {
     lines.push('- Data is cached — registries were unreachable at scan time');
   }
   if (summary.auditIncomplete) {
     lines.push(
-      '- Vulnerability check incomplete — OSV.dev was not fully reachable, so the vulnerable count is a lower bound',
+      '- Vulnerability check incomplete — some dependencies or OSV results could not be checked, so the vulnerable count is a lower bound',
     );
   }
   lines.push('');

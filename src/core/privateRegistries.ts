@@ -79,6 +79,8 @@ export function privateNpmScopes(npmrc: string): Set<string> {
   for (const rawLine of npmrc.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (line.startsWith('#') || line.startsWith(';')) continue;
+    const registry = /^registry\s*=\s*(\S+)/.exec(line);
+    if (registry && !PUBLIC_NPM.test(registry[1])) scopes.add('*');
     const match = /^(@[^:\s]+):registry\s*=\s*(\S+)/.exec(line);
     if (match && !PUBLIC_NPM.test(match[2])) scopes.add(match[1]);
   }

@@ -976,3 +976,19 @@ describe('row actions and bulk-bar clearance', () => {
     expect(wrapper(some)).toHaveClass('table__wrapper--bulk');
   });
 });
+
+it('offers a release transition as an update instead of reporting it current', () => {
+  renderTable([
+    group([
+      dep({
+        name: 'preview',
+        key: 'preview',
+        installed: '1.0.0-rc.1',
+        latest: '1.0.0',
+        updateKind: 'release',
+      }),
+    ]),
+  ]);
+  expect(screen.getByText('RELEASE')).toBeVisible();
+  expect(screen.getByRole('button', { name: /Update preview/ })).toBeEnabled();
+});

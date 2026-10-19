@@ -24,8 +24,15 @@ export class ScanQueue<T> {
   /** What the in-flight scan was asked for, so we can tell if it suffices. */
   private inFlightCheckedUpdates = false;
   private inFlightAudited = false;
+  private revision = 0;
+  private inFlightRevision = 0;
 
   constructor(private readonly run: (request: ScanRequest) => Promise<T>) {}
+
+  /** Filesystem or configuration changed; an older snapshot cannot satisfy a refresh. */
+  invalidate(): void {
+    this.revision++;
+  }
 
   /**
    * Returns the in-flight scan when it answers the question being asked, and
@@ -43,7 +50,8 @@ export class ScanQueue<T> {
     if (this.inFlight) {
       const satisfied =
         (!request.checkUpdates || this.inFlightCheckedUpdates) &&
-        (!request.audit || this.inFlightAudited);
+        (!request.audit || this.inFlightAudited) &&
+        this.inFlightRevision === this.revision;
       if (satisfied) {
         return this.inFlight;
       }
@@ -62,6 +70,7 @@ export class ScanQueue<T> {
     }
 
     this.inFlightCheckedUpdates = request.checkUpdates;
+    this.inFlightRevision = this.revision;
     this.inFlightAudited = request.audit ?? false;
     this.inFlight = this.run(request).finally(() => {
       this.inFlight = undefined;
@@ -73,6 +82,6 @@ export class ScanQueue<T> {
 
   /** Resolves once nothing is running. Used before reading a settled result. */
   async settled(): Promise<void> {
-    await this.inFlight?.catch(() => undefined);
+    while (this.inFlight) await this.inFlight.catch(() => undefined);
   }
 }

@@ -98,7 +98,7 @@ export class GradleProvider implements EcosystemProvider {
     try {
       doc = parseToml(text) as typeof doc;
     } catch {
-      return emptyManifest(absolutePath);
+      throw new Error(`Invalid TOML: ${absolutePath}`);
     }
 
     const versions = doc.versions ?? {};
@@ -114,6 +114,7 @@ export class GradleProvider implements EcosystemProvider {
         // one module (a bom and its artifact, or a rename kept for
         // compatibility), and two rows sharing a key break row selection.
         key: dependencyKey(absolutePath, 'prod', `${alias}:${parsed.name}`),
+        declaration: alias,
         name: parsed.name,
         ecosystem: 'gradle',
         scope: 'prod',
@@ -141,9 +142,7 @@ export class GradleProvider implements EcosystemProvider {
     const seen = new Set<string>();
 
     // Strip comments so commented-out dependencies do not show up as real ones.
-    const source = text
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/^\s*\/\/.*$/gm, '');
+    const source = maskComments(text);
 
     // Matches: implementation 'g:a:v'  /  implementation("g:a:v")
     const literalPattern = new RegExp(
@@ -155,7 +154,7 @@ export class GradleProvider implements EcosystemProvider {
       const [, configuration, group, artifact, version] = match;
       const name = `${group}:${artifact}`;
       const scope = CONFIGURATION_SCOPES[configuration] ?? 'prod';
-      const key = `${scope}:${name}`;
+      const key = `${configuration}:${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
@@ -164,7 +163,8 @@ export class GradleProvider implements EcosystemProvider {
         version && !version.includes('$') ? version : undefined;
 
       dependencies.push({
-        key: dependencyKey(absolutePath, scope, name),
+        key: dependencyKey(absolutePath, scope, `${configuration}:${name}`),
+        declaration: configuration,
         name,
         ecosystem: 'gradle',
         scope,
@@ -270,7 +270,13 @@ export class GradleProvider implements EcosystemProvider {
     manifestText: string,
     edit:
       | { kind: 'add'; name: string; version: string | null; scope: DepScope }
-      | { kind: 'update'; name: string; version: string; scope: DepScope }
+      | {
+          kind: 'update';
+          name: string;
+          version: string;
+          scope: DepScope;
+          declaration?: string;
+        }
       | { kind: 'remove'; name: string; scope: DepScope },
   ): string | null {
     if (edit.kind !== 'update') {
@@ -281,51 +287,29 @@ export class GradleProvider implements EcosystemProvider {
 
     const escaped = edit.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    // Build-script form: 'group:artifact:version'. A version containing `$` is
-    // an interpolation pointing at a variable or catalog entry — overwriting it
-    // with a literal would silently break that indirection everywhere else it
-    // is used, so we decline and let the caller open the file instead.
-    const literal = new RegExp(String.raw`(['"]${escaped}:)([^'"\s]+)(['"])`);
-    const literalMatch = literal.exec(manifestText);
-    if (literalMatch) {
-      if (literalMatch[2].includes('$')) {
-        return null;
-      }
-      // Uses a replacer function, not string interpolation: the version is
-      // validated upstream, but a literal `$` in a replacement string is a
-      // backreference, and this is the one place that would matter.
-      return manifestText.replace(
-        literal,
-        (_full, prefix: string, _old: string, quote: string) =>
-          `${prefix}${escapeGroovyOrKotlinString(edit.version, quote)}${quote}`,
-      );
-    }
-
-    // Catalog form: module = "group:artifact" with an adjacent version.
-    const [group, artifact] = edit.name.split(':');
-    const catalogLine = new RegExp(
-      String.raw`(module\s*=\s*"${escaped}"\s*,\s*version\s*=\s*")([^"]+)(")`,
+    const source = maskComments(manifestText);
+    const pattern = new RegExp(
+      String.raw`\b(${CONFIGURATION_NAMES})\s*(?:\(\s*)?(['"])${escaped}:([^'"\s]+)\2`,
+      'g',
     );
-    if (catalogLine.test(manifestText)) {
-      return manifestText.replace(
-        catalogLine,
-        (_full, prefix: string, _old: string, quote: string) =>
-          `${prefix}${escapeGroovyOrKotlinString(edit.version, quote)}${quote}`,
-      );
-    }
-
-    const splitForm = new RegExp(
-      String.raw`(group\s*=\s*"${group}"\s*,\s*name\s*=\s*"${artifact}"\s*,\s*version\s*=\s*")([^"]+)(")`,
+    const matches = [...source.matchAll(pattern)].filter(
+      (match) =>
+        CONFIGURATION_SCOPES[match[1]] === edit.scope &&
+        (!edit.declaration || edit.declaration === match[1]),
     );
-    if (splitForm.test(manifestText)) {
-      return manifestText.replace(
-        splitForm,
-        (_full, prefix: string, _old: string, quote: string) =>
-          `${prefix}${escapeGroovyOrKotlinString(edit.version, quote)}${quote}`,
+    if (matches.length === 1) {
+      const match = matches[0];
+      if (match[3].includes('$')) return null;
+      const start = match.index + match[0].lastIndexOf(match[3]);
+      return (
+        manifestText.slice(0, start) +
+        escapeGroovyOrKotlinString(edit.version, match[2]) +
+        manifestText.slice(start + match[3].length)
       );
     }
-
-    return null;
+    if (matches.length > 1 || !/^\s*\[libraries\]/m.test(manifestText))
+      return null;
+    return editCatalog(manifestText, edit.name, edit.version, edit.declaration);
   }
 }
 
@@ -384,11 +368,129 @@ function parseCatalogEntry(
   return { name, version };
 }
 
-function emptyManifest(absolutePath: string): ParsedManifest {
-  return {
-    ecosystem: 'gradle',
-    path: absolutePath,
-    name: path.basename(path.dirname(absolutePath)),
-    dependencies: [],
+/** Masks comments without moving declaration offsets or touching quoted URLs. */
+function maskComments(text: string): string {
+  let result = '';
+  let quote = '';
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (quote) {
+      result += char;
+      if (char === '\\' && i + 1 < text.length) result += text[++i];
+      else if (char === quote) quote = '';
+    } else if (char === '"' || char === "'") {
+      quote = char;
+      result += char;
+    } else if (char === '/' && (text[i + 1] === '/' || text[i + 1] === '*')) {
+      const block = text[i + 1] === '*';
+      result += '  ';
+      i++;
+      while (++i < text.length) {
+        if (!block && text[i] === '\n') {
+          result += '\n';
+          break;
+        }
+        if (block && text[i] === '*' && text[i + 1] === '/') {
+          result += '  ';
+          i++;
+          break;
+        }
+        result += text[i] === '\n' || text[i] === '\r' ? text[i] : ' ';
+      }
+    } else result += char;
+  }
+  return result;
+}
+
+function editCatalog(
+  text: string,
+  name: string,
+  version: string,
+  declaration?: string,
+): string | null {
+  let doc: {
+    versions?: Record<string, string>;
+    libraries?: Record<string, unknown>;
   };
+  try {
+    doc = parseToml(text) as typeof doc;
+  } catch {
+    return null;
+  }
+  const candidates = Object.entries(doc.libraries ?? {}).filter(
+    ([alias, value]) =>
+      (!declaration || alias === declaration) &&
+      parseCatalogEntry(value, doc.versions ?? {})?.name === name,
+  );
+  if (candidates.length !== 1) return null;
+  const [alias, entry] = candidates[0];
+  const escapedAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const section = /(?:^|\n)\[libraries\][^\n]*\n([\s\S]*?)(?=\n\[|$)/.exec(
+    text,
+  );
+  if (!section) return null;
+  const line = new RegExp(
+    String.raw`^\s*(?:${escapedAlias}|"${escapedAlias}"|'${escapedAlias}')\s*=.*$`,
+    'm',
+  ).exec(section[1]);
+  if (!line) return null;
+  const table =
+    entry && typeof entry === 'object'
+      ? (entry as Record<string, unknown>)
+      : undefined;
+  const ref =
+    table?.version && typeof table.version === 'object'
+      ? (table.version as { ref?: string }).ref
+      : undefined;
+  if (ref) {
+    const users = Object.values(doc.libraries ?? {}).filter(
+      (value) =>
+        value &&
+        typeof value === 'object' &&
+        (value as { version?: { ref?: string } }).version?.ref === ref,
+    );
+    if (users.length !== 1) return null;
+    const sectionVersions =
+      /(?:^|\n)\[versions\][^\n]*\n([\s\S]*?)(?=\n\[|$)/.exec(text);
+    if (!sectionVersions) return null;
+    const escapedRef = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const field = new RegExp(
+      String.raw`^(\s*(?:${escapedRef}|"${escapedRef}"|'${escapedRef}')\s*=\s*)(["'])([^"']*)\2`,
+      'm',
+    ).exec(sectionVersions[1]);
+    if (!field) return null;
+    const start =
+      sectionVersions.index +
+      sectionVersions[0].indexOf(sectionVersions[1]) +
+      field.index +
+      field[1].length +
+      1;
+    return (
+      text.slice(0, start) +
+      escapeGroovyOrKotlinString(version, field[2]) +
+      text.slice(start + field[3].length)
+    );
+  }
+  const updated =
+    typeof entry === 'string'
+      ? line[0].replace(
+          /(["'][^"']+:[^"']+:)[^"']+(["'])/,
+          (_all, prefix: string, quote: string) =>
+            `${prefix}${escapeGroovyOrKotlinString(version, quote)}${quote}`,
+        )
+      : line[0].replace(
+          /(\bversion\s*=\s*)(["'])[^"']*\2/,
+          (_all, prefix: string, quote: string) =>
+            `${prefix}${quote}${escapeGroovyOrKotlinString(version, quote)}${quote}`,
+        );
+  if (updated === line[0]) return null;
+  const start = section.index + section[0].indexOf(section[1]) + line.index;
+  const result =
+    text.slice(0, start) + updated + text.slice(start + line[0].length);
+  try {
+    parseToml(result);
+  } catch {
+    return null;
+  }
+  return result;
 }

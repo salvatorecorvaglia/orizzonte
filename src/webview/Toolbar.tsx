@@ -49,8 +49,9 @@ function OverflowMenu({ items }: { items: OverflowItem[] }) {
 
   const menuItems = useCallback(
     (): HTMLElement[] => [
-      ...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ??
-        []),
+      ...(menuRef.current?.querySelectorAll<HTMLElement>(
+        '[role="menuitem"]:not(:disabled)',
+      ) ?? []),
     ],
     [],
   );
@@ -242,7 +243,7 @@ export function Toolbar({
   const toolbarButtons = useCallback(
     (): HTMLElement[] => [
       ...(container.current?.querySelectorAll<HTMLElement>(
-        'button:not([data-menu-item])',
+        'button:not([data-menu-item]):not(:disabled)',
       ) ?? []),
     ],
     [],
@@ -260,6 +261,11 @@ export function Toolbar({
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     const buttons = toolbarButtons();
+    container.current
+      ?.querySelectorAll<HTMLButtonElement>('button:disabled')
+      .forEach((button) => {
+        button.tabIndex = -1;
+      });
     if (buttons.length === 0) return;
     const active = Math.min(activeIndex, buttons.length - 1);
     buttons.forEach((button, index) => {
@@ -593,6 +599,22 @@ export function Toolbar({
               ? `${shownCount} of ${summary.totalDependencies} packages`
               : `${summary.totalDependencies} packages`}
           </span>
+          {summary.auditStatus === 'notRun' && (
+            <span className="toolbar__kpi">audit not run</span>
+          )}
+          {summary.auditStatus === 'complete' && (
+            <span
+              className="toolbar__kpi"
+              title="Checks declared dependencies at known resolved versions; does not cover the complete transitive inventory"
+            >
+              declared dependencies audited
+            </span>
+          )}
+          {summary.auditSkipped !== undefined && summary.auditSkipped > 0 && (
+            <span className="toolbar__kpi">
+              {summary.auditSkipped} not audited
+            </span>
+          )}
           {summary.stale && (
             <span className="toolbar__kpi" title="Registries were unreachable">
               cached
@@ -605,7 +627,7 @@ export function Toolbar({
           {summary.auditIncomplete && (
             <span
               className="toolbar__kpi severity--deprecated"
-              title="OSV.dev could not be fully reached, so some vulnerabilities may be missing. Check for updates again to retry."
+              title="Some declared dependencies could not be audited, or OSV results were incomplete. Check updates to retry."
             >
               <Icon name="warning" /> audit incomplete
             </span>
