@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Explicit audit status, scope and skipped-dependency counts in the panel and exported reports, clarifying that audits cover declared dependencies at known resolved versions rather than the complete transitive inventory.
+- Browser smoke tests for the webview, plus CI coverage on macOS and both the minimum supported and stable VS Code versions.
+
+### Changed
+
+- Updated runtime dependencies, development tools, Biome and VS Code publishing tools.
+- Release workflows now reuse the CI quality checks before publishing.
+
+### Fixed
+
+- Manifest discovery now respects nested `.gitignore` rules, including anchored patterns and negations.
+- Dependency mutations recheck Workspace Trust, verify command completion before applying follow-up manifest edits, and detect edits made while a command runs. Terminals without shell integration prepare commands for manual execution.
+- Gradle updates target the matching configuration or version-catalog alias and reject ambiguous edits, including shared version references.
+- Hardened manifest parsing, version-constraint handling and workspace lockfile resolution across ecosystems.
+- Private-registry access checks now also cover package details, and authenticated registry caches are partitioned by credentials without storing tokens in cache keys.
+- Incomplete OSV responses and dependencies without reliable resolved versions no longer appear as fully audited.
+- Registry search ignores stale responses and cancels pending searches when leaving the panel; disabled toolbar actions are excluded from keyboard navigation.
+
 ## [1.1.0] - 2026-10-15
 
 ### Added
