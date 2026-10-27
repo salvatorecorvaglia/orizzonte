@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated runtime dependencies, development tools, Biome and VS Code publishing tools.
 - Release workflows now reuse the CI quality checks before publishing.
+- Update `ignore`, TanStack Virtual and Biome, and align VS Code type definitions with the minimum supported version.
+- Move the extension icon to `assets/` and update the package inclusion rules.
+
 
 ### Fixed
 
@@ -26,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private-registry access checks now also cover package details, and authenticated registry caches are partitioned by credentials without storing tokens in cache keys.
 - Incomplete OSV responses and dependencies without reliable resolved versions no longer appear as fully audited.
 - Registry search ignores stale responses and cancels pending searches when leaving the panel; disabled toolbar actions are excluded from keyboard navigation.
+- Make the shared-lockfile audit test portable across operating systems and correct font readiness waiting in the browser smoke test.
+
+### Security
+
+- Update the publishing toolchain overrides for `@azure/msal-node` to `7.1.0` and `serialize-javascript` to `7.1.3`.
 
 ## [1.1.0] - 2026-10-15
 
