@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { auditDependencies } from '../../src/core/audit.js';
 import { credentialCacheKey } from '../../src/core/cache.js';
@@ -435,7 +436,9 @@ describe('workspace I/O', () => {
     });
     // One read per representation, independent of the number of concurrent members.
     expect(
-      read.mock.calls.filter(([file]) => file === '/p/package-lock.json'),
+      read.mock.calls.filter(
+        ([file]) => file === path.join('/p', 'package-lock.json'),
+      ),
     ).toHaveLength(2);
   });
 });

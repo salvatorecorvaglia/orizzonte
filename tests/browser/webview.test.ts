@@ -99,7 +99,7 @@ for (const { width, theme, zoom, contrast } of scenarios) {
     await expect(
       page.getByRole('status').filter({ hasText: 'audit not run' }),
     ).toBeVisible();
-    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate('document.fonts.ready');
     await page.screenshot({ path: test.info().outputPath('webview.png') });
     await page.getByRole('rowgroup').focus();
     await page.keyboard.press('End');
