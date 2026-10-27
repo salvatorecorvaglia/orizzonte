@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="resources/orizzonte.svg" alt="Orizzonte logo" width="96" height="96">
+</p>
+
 # Orizzonte 🔭
 
 **Universal Visual Package Manager for Visual Studio Code**

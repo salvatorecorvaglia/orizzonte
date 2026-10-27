@@ -1,5 +1,5 @@
 # Everything the extension does not need at runtime. The published bundle is
-# dist/ plus resources/ plus the top-level README, CHANGELOG and LICENSE.
+# dist/ plus resources/ and assets/ plus the top-level README, CHANGELOG and LICENSE.
 .vscode/**
 .vscode-test/**
 .vscode-test.mjs
