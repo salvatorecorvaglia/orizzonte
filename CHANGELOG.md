@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-28
+
 ### Added
 
 - Explicit audit status, scope and skipped-dependency counts in the panel and exported reports, clarifying that audits cover declared dependencies at known resolved versions rather than the complete transitive inventory.
