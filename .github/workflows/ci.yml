@@ -50,12 +50,15 @@ jobs:
       - name: Run TypeScript typecheck
         run: pnpm run typecheck
 
-  typecheck:
-    name: Typecheck
-    needs: lint
-    runs-on: ubuntu-24.04
-    steps:
-      - run: echo "TypeScript checked in the lint job"
+      - name: Package extension
+        run: pnpm run package
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v6
+        with:
+          name: orizzonte-vsix
+          path: '*.vsix'
+          retention-days: 7
 
   test:
     name: Unit Tests (${{ matrix.os }})
@@ -89,15 +92,12 @@ jobs:
         run: pnpm test
 
   integration-test:
-    name: Integration Tests (${{ matrix.os }}, ${{ matrix.vscode }})
+    name: Integration Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    env:
-      ORIZZONTE_VSCODE_VERSION: ${{ matrix.vscode }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, windows-latest, macos-latest]
-        vscode: ['1.107.0', stable]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -114,49 +114,31 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Select daily VS Code cache
+        id: cache-day
+        shell: bash
+        run: node -e 'require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, `day=${new Date().toISOString().slice(0,10)}\n`)'
       - name: Cache VS Code test build
         uses: actions/cache@v6
         with:
           path: .vscode-test
-          key: vscode-test-${{ runner.os }}-${{ matrix.vscode }}-${{ hashFiles('package.json') }}
-          restore-keys: vscode-test-${{ runner.os }}-${{ matrix.vscode }}-
+          key: vscode-test-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ steps.cache-day.outputs.day }}
+          restore-keys: vscode-test-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}-
 
-      - name: Run VS Code integration tests (Linux)
-        if: runner.os == 'Linux'
-        run: xvfb-run -a pnpm run test:integration
-
-      - name: Run VS Code integration tests (Windows/macOS)
-        if: runner.os != 'Linux'
-        run: pnpm run test:integration
-
-  package:
-    name: Package
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Package extension
-        run: pnpm run package
-
-      - name: Upload VSIX
-        uses: actions/upload-artifact@v6
-        with:
-          name: orizzonte-vsix
-          path: '*.vsix'
-          retention-days: 7
+      - name: Run both supported VS Code versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          for version in 1.107.0 stable; do
+            export ORIZZONTE_VSCODE_VERSION="$version"
+            if [[ "$RUNNER_OS" == Linux ]]; then
+              xvfb-run -a pnpm run test:integration || failed=1
+            else
+              pnpm run test:integration || failed=1
+            fi
+          done
+          exit "$failed"
 
   audit:
     name: Dependency Audit
@@ -184,6 +166,12 @@ jobs:
   browser-test:
     name: Webview Browser Smoke
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --ipc=host
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -192,5 +180,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: Check Playwright matches the browser image
+        run: test "$(node -p 'require("@playwright/test/package.json").version')" = "1.64.1"
       - run: pnpm run test:browser

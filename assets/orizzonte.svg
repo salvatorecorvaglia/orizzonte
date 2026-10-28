@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Orizzonte — rete luminosa</title>
+  <defs>
+    <linearGradient id="background"><stop stop-color="#111426"/><stop offset=".27" stop-color="#15132f"/><stop offset=".65" stop-color="#2f176b"/><stop offset="1" stop-color="#6120d9"/></linearGradient>
+    <linearGradient id="network" gradientUnits="userSpaceOnUse" x1="196" y1="512" x2="828" y2="512"><stop stop-color="#79f5fa"/><stop offset=".28" stop-color="#86dafa"/><stop offset=".51" stop-color="#aaa8f4"/><stop offset=".76" stop-color="#e37aeb"/><stop offset="1" stop-color="#f571e5"/></linearGradient>
+    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="11"/></filter>
+    <radialGradient id="shade"><stop offset=".35" stop-color="#101325" stop-opacity="0"/><stop offset="1" stop-color="#101325" stop-opacity=".13"/></radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#background)"/>
+  <rect width="1024" height="1024" fill="url(#shade)"/>
+  <g fill="none" stroke="url(#network)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" opacity=".96">
+    <path d="M196 512 Q280 407 393 347 Q512 299 631 347 Q748 406 828 512 Q747 615 631 677 Q512 725 393 677 Q277 626 196 512"/>
+    <path d="M393 347 L297 512 L393 677"/>
+    <path d="M265 434 L297 512 L265 589"/>
+    <path d="M631 347 Q696 431 727 512 Q696 596 631 677"/>
+    <path d="M759 434 L727 512 L759 589"/>
+    <path d="M512 323 Q418 393 382 512 Q391 624 512 701"/>
+    <path d="M512 323 Q605 395 642 512 Q630 621 512 701"/>
+    <path d="M418 421 Q512 342 606 421"/>
+    <path d="M418 603 Q512 681 606 603"/>
+    <path d="M265 434 Q406 397 512 323"/>
+    <path d="M393 347 Q571 389 759 434"/>
+    <path d="M297 512 L418 421"/>
+    <path d="M297 512 L418 603"/>
+    <path d="M606 421 L727 512 L606 603"/>
+    <path d="M265 589 Q405 626 512 701"/>
+    <path d="M393 677 Q562 633 759 589"/>
+    <path d="M512 381 L631 347"/>
+    <path d="M512 643 L631 677"/>
+  </g>
+  <g fill="url(#network)" filter="url(#glow)" opacity=".65">
+    <circle cx="196" cy="512" r="18"/>
+    <circle cx="265" cy="434" r="18"/>
+    <circle cx="265" cy="589" r="18"/>
+    <circle cx="297" cy="512" r="18"/>
+    <circle cx="393" cy="347" r="18"/>
+    <circle cx="393" cy="677" r="18"/>
+    <circle cx="418" cy="421" r="18"/>
+    <circle cx="382" cy="512" r="18"/>
+    <circle cx="418" cy="603" r="18"/>
+    <circle cx="512" cy="323" r="18"/>
+    <circle cx="512" cy="381" r="18"/>
+    <circle cx="512" cy="643" r="18"/>
+    <circle cx="512" cy="701" r="18"/>
+    <circle cx="631" cy="347" r="18"/>
+    <circle cx="606" cy="421" r="18"/>
+    <circle cx="642" cy="512" r="18"/>
+    <circle cx="606" cy="603" r="18"/>
+    <circle cx="631" cy="677" r="18"/>
+    <circle cx="759" cy="434" r="18"/>
+    <circle cx="727" cy="512" r="18"/>
+    <circle cx="759" cy="589" r="18"/>
+    <circle cx="828" cy="512" r="18"/>
+  </g>
+  <g fill="url(#network)">
+    <circle cx="196" cy="512" r="15.3"/>
+    <circle cx="265" cy="434" r="15.3"/>
+    <circle cx="265" cy="589" r="15.3"/>
+    <circle cx="297" cy="512" r="15.3"/>
+    <circle cx="393" cy="347" r="15.3"/>
+    <circle cx="393" cy="677" r="15.3"/>
+    <circle cx="418" cy="421" r="15.3"/>
+    <circle cx="382" cy="512" r="15.3"/>
+    <circle cx="418" cy="603" r="15.3"/>
+    <circle cx="512" cy="323" r="15.3"/>
+    <circle cx="512" cy="381" r="15.3"/>
+    <circle cx="512" cy="643" r="15.3"/>
+    <circle cx="512" cy="701" r="15.3"/>
+    <circle cx="631" cy="347" r="15.3"/>
+    <circle cx="606" cy="421" r="15.3"/>
+    <circle cx="642" cy="512" r="15.3"/>
+    <circle cx="606" cy="603" r="15.3"/>
+    <circle cx="631" cy="677" r="15.3"/>
+    <circle cx="759" cy="434" r="15.3"/>
+    <circle cx="727" cy="512" r="15.3"/>
+    <circle cx="759" cy="589" r="15.3"/>
+    <circle cx="828" cy="512" r="15.3"/>
+  </g>
+</svg>
