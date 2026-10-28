@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/orizzonte.svg" alt="Orizzonte logo" width="96" height="96">
+  <img src="assets/orizzonte.png" alt="Orizzonte logo" width="96" height="96">
 </p>
 
 # Orizzonte 🔭
