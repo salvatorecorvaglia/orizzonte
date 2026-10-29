@@ -75,7 +75,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download validated package
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: orizzonte-vsix
 
