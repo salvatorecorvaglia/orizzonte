@@ -7,15 +7,15 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - '@testing-library/user-event@14.6.4 || 14.6.5 || 14.6.7'
   - smol-toml@1.8.0
-  - '@biomejs/biome@2.5.9 || 2.5.11'
-  - '@biomejs/cli-darwin-arm64@2.5.9 || 2.5.11'
-  - '@biomejs/cli-darwin-x64@2.5.9 || 2.5.11'
-  - '@biomejs/cli-linux-arm64-musl@2.5.9 || 2.5.11'
-  - '@biomejs/cli-linux-arm64@2.5.9 || 2.5.11'
-  - '@biomejs/cli-linux-x64-musl@2.5.9 || 2.5.11'
-  - '@biomejs/cli-linux-x64@2.5.9 || 2.5.11'
-  - '@biomejs/cli-win32-arm64@2.5.9 || 2.5.11'
-  - '@biomejs/cli-win32-x64@2.5.9 || 2.5.11'
+  - '@biomejs/biome@2.5.9 || 2.5.11 || 2.6.4'
+  - '@biomejs/cli-darwin-arm64@2.5.9 || 2.5.11 || 2.6.4'
+  - '@biomejs/cli-darwin-x64@2.5.9 || 2.5.11 || 2.6.4'
+  - '@biomejs/cli-linux-arm64-musl@2.5.9 || 2.5.11 || 2.6.4'
+  - '@biomejs/cli-linux-arm64@2.5.9 || 2.5.11 || 2.6.4'
+  - '@biomejs/cli-linux-x64-musl@2.5.9 || 2.5.11 || 2.6.4'
+  - '@biomejs/cli-linux-x64@2.5.9 || 2.5.11 || 2.6.4'
+  - '@biomejs/cli-win32-arm64@2.5.9 || 2.5.11 || 2.6.4'
+  - '@biomejs/cli-win32-x64@2.5.9 || 2.5.11 || 2.6.4'
   - '@tanstack/react-virtual@3.14.10 || 3.14.11'
   - '@tanstack/virtual-core@3.17.8 || 3.17.9'
   - '@types/vscode@1.107.0'
@@ -31,6 +31,8 @@ minimumReleaseAgeExclude:
   - react@19.3.1
   - react-dom@19.3.1
   - ignore@7.0.13
+  - '@biomejs/cli-android-arm64@2.6.4'
+  - '@biomejs/cli-android-x64@2.6.4'
 overrides:
   '@azure/identity>@azure/msal-node': '^7.1.0'
   serialize-javascript: '^7.1.3'

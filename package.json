@@ -4,7 +4,7 @@
   "description": "Universal Visual Package Manager for Visual Studio Code",
   "icon": "assets/orizzonte.png",
   "version": "1.2.0",
-  "packageManager": "pnpm@11.23.0",
+  "packageManager": "pnpm@12.16.1",
   "publisher": "orizzonte",
   "license": "MIT",
   "author": "Salvatore Corvaglia",
@@ -304,7 +304,7 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.3",
+    "@biomejs/biome": "^2.6.4",
     "@playwright/test": "^1.64.1",
     "@tanstack/react-virtual": "^3.14.23",
     "@testing-library/jest-dom": "^7.0.1",
