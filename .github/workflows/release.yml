@@ -62,17 +62,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6
-
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Download validated package
         uses: actions/download-artifact@v7
@@ -118,5 +111,5 @@ jobs:
           if [[ "${{ github.event.inputs.prerelease || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}" == "true" ]]; then
             EXTRA_ARGS="--pre-release"
           fi
-          pnpm exec ovsx publish *.vsix $EXTRA_ARGS
+          npm exec --yes --package=ovsx@1.3.0 -- ovsx publish *.vsix $EXTRA_ARGS
 
