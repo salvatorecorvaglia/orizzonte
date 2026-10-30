@@ -9,7 +9,6 @@ Thank you for your interest in contributing to **Orizzonte**! We welcome contrib
 Before you start, ensure you have the following installed on your system:
 
 - **Node.js**: `v22.13.0` or higher
-- **pnpm**: `v12.16.1` or higher (managed via `packageManager` in `package.json`)
 - **VS Code**: `v1.107.0` or higher (Orizzonte requires VS Code 1.107+ APIs)
 
 ---
