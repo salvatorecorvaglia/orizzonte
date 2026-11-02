@@ -10,7 +10,7 @@
 
 ---
 
-## ✨ Features
+## Features ✨
 
 - 🌐 **Universal Multi-Ecosystem Support**: Native parsing for `package.json`, `pyproject.toml`, `requirements.txt`, `Cargo.toml`, `go.mod`, `composer.json`, `pom.xml`, `build.gradle`, and `build.gradle.kts`.
 - ⚡ **Panel-First Interface**:
@@ -49,13 +49,12 @@
 
 ---
 
-## 🚀 Installation & Getting Started
+## Getting Started 🚀
 
 ### Installation
 - **Open VSX**: Install from the [Open VSX Registry](https://open-vsx.org/extension/orizzonte/orizzonte-vscode) or search `Orizzonte` in VS Code / VSCodium / Gitpod.
 - **GitHub Release**: Download the compiled `.vsix` from [GitHub Releases](https://github.com/salvatorecorvaglia/orizzonte/releases) and run **`Extensions: Install from VSIX...`**.
 
-### Getting Started
 1. Open any project or workspace containing supported manifest files in VS Code.
 2. Open Orizzonte:
    - Click on the **Orizzonte** icon in the Activity Bar.
@@ -65,22 +64,22 @@
 
 ---
 
-## 🤝 Contributing
+## Contributing 🤝
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-## 📜 Changelog
+## Changelog 📜
 
 Detailed release history and version changes can be found in [CHANGELOG.md](CHANGELOG.md).
 
-## 🔐 Security
+## Security 🔐
 
 If you discover a security vulnerability, please see our [Security Policy](SECURITY.md).
 
-## 📝 License
+## License 📝
 
 Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
 
----
+## Author ✍️
 
-**Author**: [Salvatore Corvaglia](https://github.com/salvatorecorvaglia)
+[Salvatore Corvaglia](https://github.com/salvatorecorvaglia)
