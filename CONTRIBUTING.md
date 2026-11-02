@@ -33,7 +33,7 @@ A few rules the webview is written to. They are easy to break by accident and ch
 
 ---
 
-## 🚀 Getting Started
+## Getting Started 🚀
 
 1. **Fork and clone the repository**:
    ```bash
