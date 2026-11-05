@@ -21,6 +21,8 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { describeError } from '../core/errors.js';
 import { findDeclaration } from '../core/findDeclaration.js';
+import type { MutationResult } from '../core/mutationBatch.js';
+import { runMutationBatch } from '../core/mutationBatch.js';
 import type { HostMessage, WebviewMessage } from '../core/protocol.js';
 import type { Scanner, ScanResult } from '../core/scanner.js';
 import type {
@@ -450,42 +452,46 @@ export class PanelManager implements vscode.Disposable {
   private async runUpdates(
     entries: Array<{ dep: Dependency; toVersion: string }>,
   ): Promise<void> {
-    const skipped: string[] = [];
-    const failed: string[] = [];
-    // One detection per project for the whole batch, not one per package.
     const toolchains: ToolchainCache = new Map();
-    for (const entry of entries) {
-      try {
-        const applied = await this.mutator.update(
+    await this.runBatch(
+      entries,
+      (entry) => entry.dep.name,
+      (entry) =>
+        this.mutator.update(
           entry.dep,
           providerFor(entry.dep.ecosystem),
           entry.toVersion,
           toolchains,
-        );
-        if (applied === 'unsupported') skipped.push(entry.dep.name);
-        if (applied === 'failed') failed.push(entry.dep.name);
-        if (applied === 'pending') break;
-      } catch (error) {
-        // One package failing (terminal disposed mid-run, a manifest edit that
-        // throws) should not abandon the rest of the batch.
-        failed.push(`${entry.dep.name} (${describeError(error)})`);
-      }
-    }
+        ),
+      'Update',
+    );
+  }
 
-    if (skipped.length > 0) {
-      this.post({
-        type: 'error',
-        message:
-          `Could not update ${skipped.join(', ')} automatically — ` +
-          `declared in a form Orizzonte cannot rewrite safely. Edit the manifest by hand.`,
-      });
-    }
-    if (failed.length > 0) {
-      this.post({
-        type: 'error',
-        message: `Updating ${failed.join(', ')} failed.`,
-      });
-    }
+  private async runBatch<T>(
+    items: readonly T[],
+    name: (item: T) => string,
+    run: (item: T) => Promise<MutationResult>,
+    action: string,
+  ): Promise<void> {
+    const results = await runMutationBatch(items, run);
+    const applied = results.filter(
+      (entry) => entry.outcome === 'applied',
+    ).length;
+    const issues = results.filter((entry) => entry.outcome !== 'applied');
+    const labels = {
+      unsupported: 'manual edit required',
+      failed: 'failed',
+      pending: 'completion unverified',
+      notAttempted: 'not attempted',
+    };
+    const details = issues.map(
+      (entry) =>
+        `${name(entry.item)}: ${labels[entry.outcome as keyof typeof labels]}${entry.error ? ` (${describeError(entry.error)})` : ''}`,
+    );
+    this.post({
+      type: issues.length ? 'error' : 'notice',
+      message: `${action}: ${applied} completed out of ${results.length}.${details.length ? ` ${details.join('; ')}.` : ''}`,
+    });
   }
 
   private async handleBulkUninstall(depKeys: string[]): Promise<void> {
@@ -503,36 +509,14 @@ export class PanelManager implements vscode.Disposable {
     );
     if (choice !== 'Remove') return;
 
-    const skipped: string[] = [];
-    const failed: string[] = [];
     const toolchains: ToolchainCache = new Map();
-    for (const dep of deps) {
-      try {
-        const outcome = await this.mutator.uninstall(
-          dep,
-          providerFor(dep.ecosystem),
-          toolchains,
-        );
-        if (outcome === 'unsupported') skipped.push(dep.name);
-        if (outcome === 'failed') failed.push(dep.name);
-        if (outcome === 'pending') break;
-      } catch (error) {
-        failed.push(`${dep.name} (${describeError(error)})`);
-      }
-    }
-
-    if (skipped.length > 0) {
-      this.post({
-        type: 'error',
-        message: `Could not remove ${skipped.join(', ')} automatically. Edit the manifest by hand.`,
-      });
-    }
-    if (failed.length > 0) {
-      this.post({
-        type: 'error',
-        message: `Removing ${failed.join(', ')} failed.`,
-      });
-    }
+    await this.runBatch(
+      deps,
+      (dep) => dep.name,
+      (dep) =>
+        this.mutator.uninstall(dep, providerFor(dep.ecosystem), toolchains),
+      'Remove',
+    );
     await this.refresh();
   }
 
@@ -600,7 +584,7 @@ export class PanelManager implements vscode.Disposable {
       );
       if (choice !== 'Update') return;
 
-      await this.mutator.runBulkUpdate(command);
+      await this.mutator.runBulkUpdate(command, manifestPath);
       await this.refresh();
       return;
     }
@@ -617,7 +601,7 @@ export class PanelManager implements vscode.Disposable {
       );
       if (choice !== 'Update') return;
 
-      await this.mutator.runBulkUpdate(command);
+      await this.mutator.runBulkUpdate(command, manifestPath);
       await this.refresh();
       return;
     }

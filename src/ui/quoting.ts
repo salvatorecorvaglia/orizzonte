@@ -138,5 +138,18 @@ export function quoteArgument(argument: string, shell: ShellKind): string {
 
 /** Joins an argv array into a command line for `shell`. */
 export function buildCommandLine(argv: string[], shell: ShellKind): string {
-  return argv.map((argument) => quoteArgument(argument, shell)).join(' ');
+  if (argv.length === 0 || argv.some((argument) => /[\r\n\0]/.test(argument))) {
+    throw new Error(
+      'Terminal commands require non-empty argv and arguments without control characters.',
+    );
+  }
+  if (shell === 'cmd' && argv.some((argument) => argument.includes('"'))) {
+    throw new Error(
+      'Arguments containing quotes cannot be passed safely through cmd.exe. Use PowerShell or Bash.',
+    );
+  }
+  const quoted = argv.map((argument) => quoteArgument(argument, shell));
+  const invocation =
+    shell === 'powershell' && quoted[0] !== argv[0] ? '& ' : '';
+  return invocation + quoted.join(' ');
 }

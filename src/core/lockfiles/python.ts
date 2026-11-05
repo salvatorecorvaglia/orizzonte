@@ -10,7 +10,14 @@
  * declaring `Jinja2` meet a lockfile recording `jinja2`.
  */
 
+import { parse as parseToml } from 'smol-toml';
 import { normalizeName } from '../pep503.js';
+import {
+  buildResolutionGraph,
+  type GraphRecord,
+  type GraphReference,
+  resolutionId,
+} from './graph.js';
 import { splitTomlPackageBlocks, tomlField } from './toml.js';
 import { addResolved, addVersion, type LockfileReader } from './types.js';
 
@@ -19,40 +26,60 @@ function reader(file: string): LockfileReader {
     file,
 
     edges(text) {
-      const graph = new Map<string, string[]>();
-
-      for (const block of splitTomlPackageBlocks(text)) {
-        const name = tomlField(block, 'name');
-        if (!name) continue;
-
-        const children = new Set<string>();
-
-        // uv: dependencies = [{ name = "x" }, ...]
-        const uvArray = /\ndependencies\s*=\s*\[([\s\S]*?)\n\]/.exec(
-          block,
-        )?.[1];
-        if (uvArray) {
-          for (const match of uvArray.matchAll(/name\s*=\s*"([^"]+)"/g)) {
-            children.add(normalizeName(match[1]));
-          }
-        }
-
-        // poetry: [package.dependencies] followed by `key = "constraint"`
-        // lines, ending at the next table header.
-        const poetryTable =
-          /\n\[package\.dependencies\]\s*\n([\s\S]*?)(?=\n\[|$)/.exec(
-            block,
-          )?.[1];
-        if (poetryTable) {
-          for (const line of poetryTable.split(/\r?\n/)) {
-            const key = /^([A-Za-z0-9._-]+)\s*=/.exec(line.trim())?.[1];
-            if (key) children.add(normalizeName(key));
-          }
-        }
-
-        graph.set(normalizeName(name), [...children]);
+      let packages: Array<{
+        name?: string;
+        version?: string;
+        source?: unknown;
+        dependencies?: unknown;
+      }>;
+      try {
+        packages =
+          (parseToml(text) as { package?: typeof packages }).package ?? [];
+      } catch {
+        return undefined;
       }
-
+      const records: GraphRecord[] = [];
+      for (const entry of packages) {
+        if (!entry.name) continue;
+        const name = normalizeName(entry.name);
+        const source = entry.source ? JSON.stringify(entry.source) : undefined;
+        const dependencies: GraphReference[] = [];
+        if (Array.isArray(entry.dependencies)) {
+          for (const child of entry.dependencies as Array<{
+            name?: string;
+            version?: string;
+            source?: unknown;
+          }>) {
+            if (child.name)
+              dependencies.push({
+                name: normalizeName(child.name),
+                version: child.version,
+                source: child.source ? JSON.stringify(child.source) : undefined,
+              });
+          }
+        } else if (
+          entry.dependencies &&
+          typeof entry.dependencies === 'object'
+        ) {
+          for (const [child, value] of Object.entries(entry.dependencies)) {
+            for (const alternative of Array.isArray(value) ? value : [value]) {
+              const constraint =
+                typeof alternative === 'string'
+                  ? alternative
+                  : (alternative as { version?: string } | undefined)?.version;
+              dependencies.push({ name: normalizeName(child), constraint });
+            }
+          }
+        }
+        records.push({
+          id: resolutionId(name, entry.version, source),
+          name,
+          version: entry.version,
+          source,
+          dependencies,
+        });
+      }
+      const graph = buildResolutionGraph(records, 'python');
       return graph.size > 0 ? graph : undefined;
     },
 

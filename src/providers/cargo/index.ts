@@ -12,6 +12,7 @@ import { cacheKey } from '../../core/cache.js';
 import { readInstalledVersions } from '../../core/lockfiles/installed.js';
 import type {
   Dependency,
+  DependencySource,
   DepScope,
   PackageMeta,
   ParsedManifest,
@@ -99,41 +100,51 @@ export class CargoProvider implements EcosystemProvider {
       ['build-dependencies', 'build'],
     ];
 
-    for (const [tableName, scope] of buckets) {
-      const table = doc[tableName] as Record<string, unknown> | undefined;
-      for (const [name, value] of Object.entries(table ?? {})) {
-        const declared = cargoConstraint(value);
-        // Path and git dependencies have no registry version to compare against.
-        if (declared === null) continue;
-        const registryName = renamedPackage(value);
-        dependencies.push({
-          key: dependencyKey(absolutePath, scope, name),
-          name,
-          ecosystem: 'cargo',
-          scope,
-          declared,
-          updateKind: 'unknown',
-          vulnerabilities: [],
-          manifestPath: absolutePath,
-          projectLabel,
-          // `workspace = true` is a real crate whose version the workspace
-          // root owns: worth looking up, not rewritable from the member —
-          // `cargo add foo@2` there replaces the inheritance with a pin.
-          ...(value && typeof value === 'object' && 'registry' in value
-            ? { source: 'private' as const }
-            : {}),
-          ...(declared === 'workspace' ? { source: 'inherited' as const } : {}),
-          // `foo = { package = "bar" }` is the crate `bar`, used as `foo`.
-          ...(registryName
-            ? {
-                registryName,
-                ...(declared === 'workspace' ||
-                (value && typeof value === 'object' && 'registry' in value)
-                  ? {}
-                  : { source: 'alias' as const }),
-              }
-            : {}),
+    const declarations: Array<{
+      tables: Record<string, unknown>;
+      target?: string;
+    }> = [{ tables: doc }];
+    for (const [target, tables] of Object.entries(
+      (doc.target ?? {}) as Record<string, unknown>,
+    )) {
+      if (tables && typeof tables === 'object')
+        declarations.push({
+          tables: tables as Record<string, unknown>,
+          target,
         });
+    }
+    for (const { tables, target } of declarations) {
+      for (const [tableName, scope] of buckets) {
+        const table = tables[tableName] as Record<string, unknown> | undefined;
+        for (const [name, value] of Object.entries(table ?? {})) {
+          const registryName = renamedPackage(value);
+          const source = cargoSource(value, registryName);
+          const location =
+            value && typeof value === 'object'
+              ? (value as { path?: string; git?: string })
+              : undefined;
+          const declared =
+            cargoConstraint(value) ?? location?.path ?? location?.git;
+          if (declared === undefined || declared === null) continue;
+          dependencies.push({
+            key: dependencyKey(
+              absolutePath,
+              scope,
+              target === undefined ? name : `${name}::target::${target}`,
+            ),
+            ...(target === undefined ? {} : { cargoTarget: target }),
+            name,
+            ecosystem: 'cargo',
+            scope,
+            declared,
+            updateKind: 'unknown',
+            vulnerabilities: [],
+            manifestPath: absolutePath,
+            projectLabel,
+            ...(source ? { source } : {}),
+            ...(registryName ? { registryName } : {}),
+          });
+        }
       }
     }
 
@@ -167,6 +178,7 @@ export class CargoProvider implements EcosystemProvider {
       dependencies.map((dep) => ({
         name: registryNameOf(dep),
         declared: dep.declared,
+        dependency: dep,
       })),
     );
   }
@@ -356,7 +368,7 @@ export class CargoProvider implements EcosystemProvider {
     dep: Dependency,
     toVersion: string,
   ): Command | null {
-    if (!isUpdatable(dep)) return null;
+    if (!isUpdatable(dep) || !validTarget(dep.cargoTarget)) return null;
     const crate = registryNameOf(dep);
     const command = this.installCommand(toolchain, crate, toVersion, dep.scope);
     // A renamed dependency stays renamed: without `--rename` cargo would add
@@ -365,15 +377,24 @@ export class CargoProvider implements EcosystemProvider {
       if (!this.isValidPackageName(dep.name)) return null;
       command.argv.push('--rename', dep.name);
     }
+    if (command && dep.cargoTarget !== undefined)
+      command.argv.push('--target', dep.cargoTarget);
     return command;
   }
 
   uninstallCommand(toolchain: Toolchain, dep: Dependency): Command | null {
-    if (!this.isValidPackageName(dep.name)) return null;
+    if (!this.isValidPackageName(dep.name) || !validTarget(dep.cargoTarget))
+      return null;
     // `cargo remove` looks only in [dependencies] unless told otherwise, so
     // removing a dev- or build-dependency without the flag always failed.
     return {
-      argv: ['cargo', 'remove', dep.name, ...tableFlags(dep.scope)],
+      argv: [
+        'cargo',
+        'remove',
+        dep.name,
+        ...tableFlags(dep.scope),
+        ...(dep.cargoTarget === undefined ? [] : ['--target', dep.cargoTarget]),
+      ],
       cwd: toolchain.cwd,
       description: `Remove ${dep.name}`,
     };
@@ -450,4 +471,25 @@ function cargoConstraint(value: unknown): string | null {
     if (table.workspace === true) return 'workspace';
   }
   return null;
+}
+
+function validTarget(target: string | undefined): boolean {
+  return (
+    target === undefined ||
+    /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(target) ||
+    /^cfg\([^\r\n\0]*\)$/.test(target)
+  );
+}
+
+function cargoSource(
+  value: unknown,
+  registryName: string | undefined,
+): DependencySource | undefined {
+  if (value && typeof value === 'object') {
+    if ('path' in value) return 'path';
+    if ('git' in value) return 'git';
+    if ('registry' in value) return 'private';
+    if ('workspace' in value && value.workspace === true) return 'inherited';
+  }
+  return registryName ? 'alias' : undefined;
 }

@@ -145,7 +145,9 @@ export interface EcosystemProvider {
    *
    * @param dependencies The manifest's dependencies, when known. Their declared
    *   ranges pick the right copy when a lockfile resolves a package more than
-   *   once (two majors of one package in a yarn.lock or Cargo.lock).
+   *   once (two majors of one package in a yarn.lock or Cargo.lock). Implementations
+   *   also attach versionResolution to each supplied dependency so inferred
+   *   fallbacks cannot be mistaken for exact resolutions by the scanner.
    */
   readLockfile?(
     manifestDir: string,
@@ -220,6 +222,12 @@ export interface EcosystemProvider {
     dep: Dependency,
     toVersion: string,
   ): Command | null;
+
+  /** Refuse a mutation before command-or-edit fallback when declaration identity is unsafe. */
+  canMutateDependency?(
+    dep: Dependency,
+    operation: 'update' | 'remove',
+  ): boolean;
 
   uninstallCommand(toolchain: Toolchain, dep: Dependency): Command | null;
 

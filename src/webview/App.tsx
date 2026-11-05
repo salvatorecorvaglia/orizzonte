@@ -164,7 +164,10 @@ export function App() {
     'details',
   );
   const [whyByKey, setWhyByKey] = useState<
-    Record<string, { roots: DepNode[]; source: 'lockfile' | 'registry' }>
+    Record<
+      string,
+      { roots: DepNode[]; source: 'lockfile' | 'registry'; partial?: boolean }
+    >
   >({});
   /**
    * depKey -> the changelog entries fetched for it, or undefined when the
@@ -432,7 +435,11 @@ export function App() {
         case 'whyTree':
           setWhyByKey((current) => ({
             ...current,
-            [message.depKey]: { roots: message.roots, source: message.source },
+            [message.depKey]: {
+              roots: message.roots,
+              source: message.source,
+              partial: message.partial,
+            },
           }));
           break;
 

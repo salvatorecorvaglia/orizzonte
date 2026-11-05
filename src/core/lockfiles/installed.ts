@@ -12,7 +12,7 @@
 
 import * as path from 'node:path';
 import type { ProviderContext } from '../../providers/provider.js';
-import type { Ecosystem } from '../types.js';
+import type { Dependency, Ecosystem, VersionResolution } from '../types.js';
 import { maxSatisfying, registryConstraint } from '../versions/index.js';
 import { lockfilesFor } from './index.js';
 import { selectLockfile } from './resolve.js';
@@ -24,6 +24,8 @@ export interface LockfileWant {
   name: string;
   /** The constraint the manifest declares, for picking among several copies. */
   declared: string;
+  /** Optional owner: scanner-facing calls retain per-declaration evidence. */
+  dependency?: Dependency;
 }
 
 /**
@@ -60,13 +62,36 @@ export async function readInstalledVersions(
     },
     ctx.lockfileMemo && { store: ctx.lockfileMemo, namespace: 'installed' },
   );
-  if (!found) return new Map();
+  if (!found) {
+    for (const want of wants) {
+      if (!want.dependency) continue;
+      want.dependency.versionResolution = {
+        source: 'unresolved',
+        confidence: 'unknown',
+      };
+      want.dependency.installed = undefined;
+      want.dependency.installedIsApproximate = true;
+    }
+    return new Map();
+  }
 
   const importer = path
     .relative(found.lockDir, manifestDir)
     .split(path.sep)
     .join('/');
-  return chooseVersions(found.index, importer, wants, ecosystem);
+  // npm builds a merged importer map; compute it once for the whole manifest.
+  const entries = found.index.importer?.(importer);
+  const index = found.index.importer
+    ? { ...found.index, importer: () => entries }
+    : found.index;
+  for (const want of wants) {
+    if (!want.dependency) continue;
+    const resolution = resolveVersion(index, importer, want, ecosystem);
+    want.dependency.versionResolution = resolution;
+    want.dependency.installed = resolution.version;
+    want.dependency.installedIsApproximate = resolution.confidence !== 'exact';
+  }
+  return chooseVersions(index, importer, wants, ecosystem);
 }
 
 /** The pure half of `readInstalledVersions`, for the tests. */
@@ -80,24 +105,48 @@ export function chooseVersions(
   for (const [name, versions] of index.all) result.set(name, versions[0]);
 
   for (const want of wants) {
-    const exact = index.descriptors?.get(`${want.name}@${want.declared}`);
-    if (exact) {
-      result.set(want.name, exact);
-      continue;
-    }
-    const versions = index.all.get(want.name);
-    if (!versions || versions.length < 2) continue;
-    const best = maxSatisfying(
-      ecosystem,
-      versions,
-      registryConstraint(want.declared),
-    );
-    if (best) result.set(want.name, best);
+    const resolution = resolveVersion(index, importer, want, ecosystem);
+    if (resolution.version) result.set(want.name, resolution.version);
+    else result.delete(want.name);
   }
-
-  // Last, so it wins: the member's own record is not a guess.
-  for (const [name, version] of index.importer?.(importer) ?? []) {
-    result.set(name, version);
+  // Preserve the legacy map's importer entries for callers without declarations.
+  if (wants.length === 0) {
+    for (const [name, version] of index.importer?.(importer) ?? [])
+      result.set(name, version);
   }
   return result;
+}
+
+/** Resolve one declaration without collapsing another declaration of the same name. */
+export function resolveVersion(
+  index: ResolvedIndex,
+  importer: string,
+  want: LockfileWant,
+  ecosystem: Ecosystem,
+): VersionResolution {
+  const constraint = registryConstraint(want.declared);
+  const compatible = (version: string) =>
+    maxSatisfying(ecosystem, [version], constraint) === version;
+  const importerEntries = index.importer?.(importer);
+  const imported = importerEntries?.get(want.name);
+  if (imported !== undefined) {
+    return compatible(imported)
+      ? { version: imported, source: 'lockfile-importer', confidence: 'exact' }
+      : { source: 'unresolved', confidence: 'unknown' };
+  }
+  const descriptor = index.descriptors?.get(`${want.name}@${want.declared}`);
+  if (descriptor !== undefined)
+    return {
+      version: descriptor,
+      source: 'lockfile-descriptor',
+      confidence: 'exact',
+    };
+  const versions = [...new Set(index.all.get(want.name) ?? [])];
+  const best = maxSatisfying(ecosystem, versions, constraint);
+  if (!best) return { source: 'unresolved', confidence: 'unknown' };
+  return {
+    version: best,
+    source: versions.length === 1 ? 'lockfile-single' : 'lockfile-range',
+    confidence: versions.length === 1 && !index.importer ? 'exact' : 'inferred',
+  };
 }

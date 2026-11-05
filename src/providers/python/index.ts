@@ -13,9 +13,12 @@
 import * as path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import { cacheKey, credentialCacheKey, TTL } from '../../core/cache.js';
+import { isAbortError } from '../../core/errors.js';
 import { readInstalledVersions } from '../../core/lockfiles/installed.js';
 import { ancestorDirectories } from '../../core/lockfiles/resolve.js';
 import { normalizeName } from '../../core/pep503.js';
+import { SharedRequests } from '../../core/sharedRequest.js';
+import { protectUncertainSources } from '../../core/sourcePrivacy.js';
 import type {
   Dependency,
   DependencyGroup,
@@ -97,6 +100,11 @@ interface SimpleIndex {
   projects: Array<{ name: string }>;
 }
 
+const indexRequests = new WeakMap<
+  ProviderContext['cache'],
+  SharedRequests<string>
+>();
+
 export class PythonProvider implements EcosystemProvider {
   readonly id = 'python' as const;
   readonly manifestFiles = [
@@ -125,9 +133,11 @@ export class PythonProvider implements EcosystemProvider {
     _ctx: ProviderContext,
   ): Promise<ParsedManifest> {
     const base = path.basename(absolutePath);
-    return base === 'pyproject.toml'
-      ? this.parsePyproject(absolutePath, text)
-      : this.parseRequirements(absolutePath, text);
+    const manifest =
+      base === 'pyproject.toml'
+        ? this.parsePyproject(absolutePath, text)
+        : this.parseRequirements(absolutePath, text);
+    return protectUncertainSources(manifest, text, _ctx);
   }
 
   private parsePyproject(absolutePath: string, text: string): ParsedManifest {
@@ -160,12 +170,17 @@ export class PythonProvider implements EcosystemProvider {
       scope: DepScope,
       group?: DependencyGroup,
       source?: DependencySource,
+      requirement?: Dependency['pythonRequirement'],
     ) => {
       if (!name) return;
       const identity = group
         ? `${normalizeName(name)}::${group.kind}::${group.name}`
         : normalizeName(name);
-      const key = dependencyKey(absolutePath, scope, identity);
+      const condition =
+        requirement?.marker || requirement?.extras.length
+          ? `::${requirement.extras.join(',')}::${requirement.marker ?? ''}`
+          : '';
+      const key = dependencyKey(absolutePath, scope, `${identity}${condition}`);
       if (seen.has(key)) return;
       seen.add(key);
 
@@ -175,6 +190,7 @@ export class PythonProvider implements EcosystemProvider {
         ecosystem: 'python',
         scope,
         declared,
+        ...(requirement ? { pythonRequirement: requirement } : {}),
         updateKind: 'unknown',
         vulnerabilities: [],
         manifestPath: absolutePath,
@@ -195,7 +211,15 @@ export class PythonProvider implements EcosystemProvider {
     // PEP 621: project.dependencies is a list of requirement strings.
     for (const entry of (project?.dependencies as string[] | undefined) ?? []) {
       const parsed = parseRequirement(entry);
-      if (parsed) add(parsed.name, parsed.specifier, 'prod');
+      if (parsed)
+        add(
+          parsed.name,
+          parsed.specifier,
+          'prod',
+          undefined,
+          undefined,
+          requirementDetails(entry, parsed),
+        );
     }
 
     // PEP 735 / setuptools: optional-dependencies is a table of extras.
@@ -207,10 +231,17 @@ export class PythonProvider implements EcosystemProvider {
       for (const entry of entries) {
         const parsed = parseRequirement(entry);
         if (parsed)
-          add(parsed.name, parsed.specifier, scope, {
-            kind: 'extra',
-            name: group,
-          });
+          add(
+            parsed.name,
+            parsed.specifier,
+            scope,
+            {
+              kind: 'extra',
+              name: group,
+            },
+            undefined,
+            requirementDetails(entry, parsed),
+          );
       }
     }
 
@@ -224,10 +255,17 @@ export class PythonProvider implements EcosystemProvider {
         if (typeof entry !== 'string') continue; // skip {include-group = ...}
         const parsed = parseRequirement(entry);
         if (parsed)
-          add(parsed.name, parsed.specifier, scope, {
-            kind: 'group',
-            name: group,
-          });
+          add(
+            parsed.name,
+            parsed.specifier,
+            scope,
+            {
+              kind: 'group',
+              name: group,
+            },
+            undefined,
+            requirementDetails(entry, parsed),
+          );
       }
     }
 
@@ -243,6 +281,7 @@ export class PythonProvider implements EcosystemProvider {
         'prod',
         undefined,
         poetrySource(value),
+        poetryRequirementDetails(value),
       );
     }
     const poetryGroups = poetry?.group as
@@ -260,6 +299,7 @@ export class PythonProvider implements EcosystemProvider {
             name: group,
           },
           poetrySource(value),
+          poetryRequirementDetails(value),
         );
       }
     }
@@ -274,8 +314,11 @@ export class PythonProvider implements EcosystemProvider {
         'dev',
         { kind: 'group', name: 'dev' },
         poetrySource(value),
+        poetryRequirementDetails(value),
       );
     }
+
+    markAmbiguousRequirements(dependencies);
 
     // uv workspace members.
     const uv = tool?.uv as Record<string, unknown> | undefined;
@@ -326,7 +369,7 @@ export class PythonProvider implements EcosystemProvider {
       const key = dependencyKey(
         absolutePath,
         scope,
-        `${normalizeName(parsed.name)}${marker}`,
+        `${normalizeName(parsed.name)}${parsed.extras.length ? `::extras=${parsed.extras.join(',')}` : ''}${marker}`,
       );
       if (seen.has(key)) continue;
       seen.add(key);
@@ -336,6 +379,7 @@ export class PythonProvider implements EcosystemProvider {
         ecosystem: 'python',
         scope,
         declared: parsed.specifier,
+        pythonRequirement: requirementDetails(line, parsed),
         ...(requirementSource(parsed.specifier)
           ? { source: requirementSource(parsed.specifier) }
           : {}),
@@ -346,6 +390,7 @@ export class PythonProvider implements EcosystemProvider {
       });
     }
 
+    markAmbiguousRequirements(dependencies);
     return {
       ecosystem: 'python',
       path: absolutePath,
@@ -370,6 +415,7 @@ export class PythonProvider implements EcosystemProvider {
       dependencies.map((dep) => ({
         name: normalizeName(dep.name),
         declared: dep.declared,
+        dependency: dep,
       })),
     );
   }
@@ -556,9 +602,14 @@ export class PythonProvider implements EcosystemProvider {
     const index = ctx.registryOverride('python') ?? DEFAULT_INDEX;
     const results: SearchResult[] = [];
 
-    const exact = await this.fetchMetadata(query, ctx, signal).catch(
-      () => undefined,
-    );
+    const [exact, names] = await Promise.all([
+      this.fetchMetadata(query, ctx, signal).catch((error) => {
+        if (signal?.aborted) throw error;
+        return undefined;
+      }),
+      this.projectIndex(index, ctx, signal),
+    ]);
+    signal?.throwIfAborted();
     if (exact) {
       const versions = await this.fetchVersions([query], ctx, signal);
       results.push({
@@ -576,7 +627,6 @@ export class PythonProvider implements EcosystemProvider {
       });
     }
 
-    const names = await this.projectIndex(index, ctx, signal);
     const needle = normalizeName(query);
     const matches = candidateNames(names, needle)
       // Prefix matches are far more relevant than substring matches.
@@ -614,38 +664,41 @@ export class PythonProvider implements EcosystemProvider {
     ctx: ProviderContext,
     signal?: AbortSignal,
   ): Promise<string> {
-    const key = credentialCacheKey(
-      cacheKey('pypi', 'index', index),
-      ctx.registryAuthHeaders('python'),
-    );
+    const headers = { ...ctx.registryAuthHeaders('python') };
+    const key = credentialCacheKey(cacheKey('pypi', 'index', index), headers);
+    signal?.throwIfAborted();
     const cached = ctx.cache.get<string>(key);
     if (cached !== undefined) return cached;
-
+    let requests = indexRequests.get(ctx.cache);
+    if (!requests) {
+      requests = new SharedRequests<string>();
+      indexRequests.set(ctx.cache, requests);
+    }
     try {
-      const response = await ctx.http.getJson<SimpleIndex>(`${index}/simple/`, {
-        signal,
-        headers: {
-          Accept: 'application/vnd.pypi.simple.v1+json',
-          ...ctx.registryAuthHeaders('python'),
+      return await requests.run(
+        key,
+        async (sharedSignal) => {
+          const response = await ctx.http.getJson<SimpleIndex>(
+            `${index}/simple/`,
+            {
+              signal: sharedSignal,
+              headers: {
+                Accept: 'application/vnd.pypi.simple.v1+json',
+                ...headers,
+              },
+              timeoutMs: 60_000,
+              noCache: true,
+            },
+          );
+          sharedSignal.throwIfAborted();
+          const joined = `\n${response.projects.map((entry) => normalizeName(entry.name)).join('\n')}\n`;
+          await ctx.cache.set(key, joined, TTL.nameIndex, { persist: false });
+          return joined;
         },
-        timeoutMs: 60_000,
-        /*
-         * Keeping this out of `globalState` is only half the job: the ETag
-         * cache in `http.ts` retains full response bodies, so revalidating a
-         * tens-of-megabyte document would pin the raw JSON in memory for the
-         * life of the window — undoing `persist: false` one layer down. The
-         * parsed name list above is the copy worth keeping.
-         */
-        noCache: true,
-      });
-      // Leading and trailing delimiters so every name is bounded by one,
-      // which is what lets `candidateNames` find line edges without a split.
-      const joined = `\n${response.projects
-        .map((entry) => normalizeName(entry.name))
-        .join('\n')}\n`;
-      await ctx.cache.set(key, joined, TTL.nameIndex, { persist: false });
-      return joined;
-    } catch {
+        signal,
+      );
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw error;
       return ctx.cache.getStale<string>(key) ?? '';
     }
   }
@@ -671,6 +724,12 @@ export class PythonProvider implements EcosystemProvider {
     toVersion: string,
   ): Command | null {
     if (!isUpdatable(dep)) return null;
+    if (!this.canMutateDependency(dep, 'update')) return null;
+    if (
+      toolchain.id === 'poetry' &&
+      (dep.pythonRequirement?.marker || dep.pythonRequirement?.extras.length)
+    )
+      return null;
     // The group the package already lives in, so the update lands there
     // rather than as a second copy in `dev`.
     return this.addCommand(
@@ -679,6 +738,7 @@ export class PythonProvider implements EcosystemProvider {
       toVersion,
       dep.group,
       dep.declared,
+      dep.pythonRequirement,
     );
   }
 
@@ -688,14 +748,20 @@ export class PythonProvider implements EcosystemProvider {
     version: string | null,
     group: DependencyGroup | undefined,
     declared?: string,
+    requirement?: Dependency['pythonRequirement'],
   ): Command | null {
     if (!this.isValidPackageName(name)) return null;
     const operator = version ? updateOperator(declared, toolchain.id) : '==';
-    const spec = !version
-      ? name
-      : operator === '^' || operator === '~'
-        ? `${name}@${operator}${version}`
-        : `${name}${operator}${version}`;
+    const requirementName = requirement?.extras.length
+      ? `${name}[${requirement.extras.join(',')}]`
+      : name;
+    const spec =
+      (!version
+        ? requirementName
+        : operator === '^' || operator === '~'
+          ? `${requirementName}@${operator}${version}`
+          : `${requirementName}${operator}${version}`) +
+      (requirement?.marker ? `; ${requirement.marker}` : '');
 
     switch (toolchain.id) {
       case 'uv': {
@@ -730,8 +796,22 @@ export class PythonProvider implements EcosystemProvider {
     }
   }
 
+  canMutateDependency(
+    dep: Dependency,
+    operation: 'update' | 'remove',
+  ): boolean {
+    return (
+      !dep.pythonRequirement?.requiresManualMutation &&
+      !(operation === 'remove' && dep.pythonRequirement?.marker)
+    );
+  }
+
   uninstallCommand(toolchain: Toolchain, dep: Dependency): Command | null {
-    if (!this.isValidPackageName(dep.name)) return null;
+    if (
+      !this.isValidPackageName(dep.name) ||
+      !this.canMutateDependency(dep, 'remove')
+    )
+      return null;
     switch (toolchain.id) {
       case 'uv': {
         const flags = uvGroupFlags(dep.group);
@@ -897,6 +977,50 @@ export class PythonProvider implements EcosystemProvider {
     lines[match.start] =
       `${leading}${parsed.name}${extras}${specifier}${marker}${comment}`;
     return lines.join(eol);
+  }
+}
+
+function poetryRequirementDetails(
+  value: unknown,
+): Dependency['pythonRequirement'] {
+  if (!value || typeof value !== 'object') return undefined;
+  if (
+    !Array.isArray(value) &&
+    typeof (value as { version?: unknown }).version === 'string' &&
+    Object.keys(value).every((key) => key === 'version')
+  )
+    return undefined;
+  return { extras: [], requiresManualMutation: true };
+}
+
+function requirementDetails(
+  raw: string,
+  parsed: NonNullable<ReturnType<typeof parseRequirement>>,
+): NonNullable<Dependency['pythonRequirement']> {
+  const markerAt = raw.indexOf(';');
+  return {
+    raw,
+    extras: parsed.extras,
+    ...(markerAt >= 0 ? { marker: raw.slice(markerAt + 1).trim() } : {}),
+  };
+}
+
+/** A CLI keyed by package name cannot select between same-group conditional declarations. */
+function markAmbiguousRequirements(dependencies: Dependency[]): void {
+  const byGroup = new Map<string, Dependency[]>();
+  for (const dep of dependencies) {
+    const key = `${normalizeName(dep.name)}::${dep.group?.kind ?? ''}::${dep.group?.name ?? ''}::${dep.scope}`;
+    const siblings = byGroup.get(key) ?? [];
+    siblings.push(dep);
+    byGroup.set(key, siblings);
+  }
+  for (const siblings of byGroup.values()) {
+    if (siblings.length < 2) continue;
+    for (const dep of siblings)
+      dep.pythonRequirement = {
+        ...(dep.pythonRequirement ?? { extras: [] }),
+        requiresManualMutation: true,
+      };
   }
 }
 

@@ -257,3 +257,32 @@ describe('characters cmd.exe cannot be protected from', () => {
     ).toThrow();
   });
 });
+
+describe('terminal command dispatch safety', () => {
+  it('uses the PowerShell invocation operator for quoted executable paths', () => {
+    expect(
+      buildCommandLine(
+        ['C:\\Program Files\\Python\\python.exe', '-m', 'pip'],
+        'powershell',
+      ),
+    ).toBe("& 'C:\\Program Files\\Python\\python.exe' -m pip");
+  });
+  it('refuses control characters instead of typing additional terminal lines', () => {
+    for (const shell of ['cmd', 'powershell', 'posix'] as const) {
+      expect(() => buildCommandLine(['echo', 'x\ncalc'], shell)).toThrow(
+        'control characters',
+      );
+      expect(() => buildCommandLine(['echo', 'x\rcalc'], shell)).toThrow(
+        'control characters',
+      );
+    }
+  });
+  it('refuses embedded quotes through cmd batch wrappers', () => {
+    expect(() =>
+      buildCommandLine(
+        ['pip', 'install', 'pkg; python_version < "3.12"'],
+        'cmd',
+      ),
+    ).toThrow('Use PowerShell or Bash');
+  });
+});

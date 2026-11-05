@@ -164,7 +164,11 @@ export class ComposerProvider implements EcosystemProvider {
       'composer',
       manifestDir,
       ctx,
-      dependencies.map((dep) => ({ name: dep.name, declared: dep.declared })),
+      dependencies.map((dep) => ({
+        name: dep.name,
+        declared: dep.declared,
+        dependency: dep,
+      })),
     );
   }
 

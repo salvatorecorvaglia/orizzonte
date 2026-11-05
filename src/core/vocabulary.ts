@@ -160,7 +160,7 @@ export function notUpdatableReason(dep: Dependency): string | undefined {
     case 'url':
       return 'Installed from a URL, not from the registry.';
     case 'private':
-      return 'Served by a private registry (an .npmrc scope or GOPRIVATE), which Orizzonte does not query. Point orizzonte.registryOverrides at it to check versions.';
+      return 'A private or custom registry may supply this package. Public lookups and vulnerability queries are skipped to protect its name. Configure orizzonte.registryOverrides explicitly to check registry versions.';
     default:
       return undefined;
   }

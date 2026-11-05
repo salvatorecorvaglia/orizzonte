@@ -6,12 +6,9 @@
  * understanding of what a key means.
  */
 
-import {
-  addEdges,
-  addResolved,
-  addVersion,
-  type LockfileReader,
-} from './types.js';
+import * as path from 'node:path';
+import { buildResolutionGraph, type GraphRecord } from './graph.js';
+import { addResolved, addVersion, type LockfileReader } from './types.js';
 
 /** The synthetic node standing for the project itself. */
 export const NPM_ROOT = '__root__';
@@ -19,7 +16,15 @@ export const NPM_ROOT = '__root__';
 interface NpmLock {
   packages?: Record<
     string,
-    { version?: string; dependencies?: Record<string, string> }
+    {
+      name?: string;
+      version?: string;
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+      link?: boolean;
+      resolved?: string;
+    }
   >;
   /** lockfileVersion 1's only map; v2 keeps it for old npm clients. */
   dependencies?: Record<string, { version?: string }>;
@@ -64,11 +69,44 @@ export const npmLockfile: LockfileReader = {
     const lock = parse(text);
     if (!lock) return undefined;
 
-    const graph = new Map<string, string[]>();
-    for (const [key, entry] of Object.entries(lock.packages ?? {})) {
-      // A package can appear at several install paths; union their edges.
-      addEdges(graph, npmLockName(key), Object.keys(entry.dependencies ?? {}));
+    const packages = lock.packages ?? {};
+    const records: GraphRecord[] = [];
+    for (const [key, entry] of Object.entries(packages)) {
+      if (entry.link) continue;
+      const root = !key.includes('node_modules/');
+      const dependencies = {
+        ...entry.dependencies,
+        ...entry.optionalDependencies,
+        ...(root ? entry.devDependencies : {}),
+      };
+      records.push({
+        id: key,
+        name: root ? NPM_ROOT : (entry.name ?? npmLockName(key)),
+        version: root ? undefined : entry.version,
+        ...(root ? { root: true, importer: key } : {}),
+        dependencies: Object.keys(dependencies).map((name) => {
+          let dir = key;
+          for (;;) {
+            const candidate = path.posix.join(dir, 'node_modules', name);
+            const target = packages[candidate];
+            if (target)
+              return {
+                name,
+                id:
+                  target.link && target.resolved
+                    ? target.resolved.replace(/^\.\//, '')
+                    : candidate,
+              };
+            if (!dir || dir === '.') break;
+            const parent = path.posix.dirname(dir);
+            if (parent === dir) break;
+            dir = parent === '.' ? '' : parent;
+          }
+          return { name, id: `missing:${key}:${name}` };
+        }),
+      });
     }
+    const graph = buildResolutionGraph(records, 'node');
     return graph;
   },
 

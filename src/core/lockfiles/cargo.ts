@@ -1,11 +1,15 @@
 /**
  * Cargo.lock.
  *
- * A flat sequence of `[[package]]` tables, read with the shared TOML block
- * splitter and a couple of field reads rather than a full TOML parse — the
- * two fields either reader needs are the same two.
+ * Resolution identities include the package name, version and source.
+ * Dependency references may explicitly select a version and source.
  */
 
+import {
+  buildResolutionGraph,
+  type GraphRecord,
+  resolutionId,
+} from './graph.js';
 import { splitTomlPackageBlocks, tomlField } from './toml.js';
 import { addResolved, addVersion, type LockfileReader } from './types.js';
 
@@ -13,19 +17,32 @@ export const cargoLockfile: LockfileReader = {
   file: 'Cargo.lock',
 
   edges(text) {
-    const graph = new Map<string, string[]>();
+    const records: GraphRecord[] = [];
     for (const block of splitTomlPackageBlocks(text)) {
       const name = tomlField(block, 'name');
       if (!name) continue;
+      const version = tomlField(block, 'version');
+      const source = tomlField(block, 'source');
       const depsBlock =
         /dependencies\s*=\s*\[([\s\S]*?)\]/.exec(block)?.[1] ?? '';
-      graph.set(
+      records.push({
+        id: resolutionId(name, version, source),
         name,
-        [...depsBlock.matchAll(/"([^"\s]+)/g)].map(
-          (match) => match[1].split(' ')[0],
-        ),
-      );
+        version,
+        source,
+        dependencies: [...depsBlock.matchAll(/"([^"\n]+)"/g)].map((match) => {
+          const [child, childVersion, ...origin] = match[1].split(' ');
+          return {
+            name: child,
+            version: childVersion,
+            source: origin.length
+              ? origin.join(' ').replace(/^\(|\)$/g, '')
+              : undefined,
+          };
+        }),
+      });
     }
+    const graph = buildResolutionGraph(records, 'cargo');
     return graph;
   },
 

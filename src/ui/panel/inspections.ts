@@ -215,6 +215,7 @@ export class PanelInspections implements vscode.Disposable {
         depKey,
         roots: result.roots,
         source: result.source,
+        partial: result.partial,
       });
     } catch (error) {
       // A superseded request is the expected outcome of clicking the next row,

@@ -10,12 +10,8 @@
  */
 
 import { parse as parseYaml } from 'yaml';
-import {
-  addEdges,
-  addResolved,
-  addVersion,
-  type LockfileReader,
-} from './types.js';
+import { buildResolutionGraph, type GraphRecord } from './graph.js';
+import { addResolved, addVersion, type LockfileReader } from './types.js';
 
 interface PnpmLockEntry {
   dependencies?: Record<string, unknown>;
@@ -63,6 +59,12 @@ export function splitPnpmKey(key: string): {
   const paren = rest.indexOf('(');
   if (paren >= 0) rest = rest.slice(0, paren);
 
+  const slash = rest.lastIndexOf('/');
+  if (slash > 0 && /^\d/.test(rest.slice(slash + 1)))
+    return {
+      name: rest.slice(0, slash),
+      version: rest.slice(slash + 1).split('_')[0],
+    };
   const at = rest.lastIndexOf('@');
   if (at <= 0) return { name: rest || undefined, version: undefined };
   return {
@@ -86,21 +88,52 @@ export const pnpmLockfile: LockfileReader = {
     const doc = parse(text);
     if (!doc) return undefined;
 
-    const graph = new Map<string, string[]>();
-    for (const section of [doc.packages, doc.snapshots]) {
-      for (const [key, entry] of Object.entries(section ?? {})) {
-        const { name } = splitPnpmKey(key);
-        if (!name) continue;
-        if (!graph.has(name)) graph.set(name, []);
-
-        const children = [
-          ...Object.keys(entry?.dependencies ?? {}),
-          ...Object.keys(entry?.optionalDependencies ?? {}),
-        ];
-        if (children.length === 0) continue;
-        addEdges(graph, name, children);
-      }
+    const section = doc.snapshots ?? doc.packages ?? {};
+    const rawId = (key: string) => key.replace(/^\//, '');
+    const reference = (name: string, value: unknown) => {
+      const raw =
+        typeof value === 'string'
+          ? value
+          : (value as { version?: string } | undefined)?.version;
+      const candidates = raw ? [raw, `${name}@${raw}`, `${name}/${raw}`] : [];
+      const found = candidates.find(
+        (key) => key in section || `/${key}` in section,
+      );
+      const version = raw ? splitPnpmKey(`${name}@${raw}`).version : undefined;
+      return {
+        name,
+        version,
+        id: found ? rawId(found) : `missing:${name}:${raw ?? ''}`,
+      };
+    };
+    const records: GraphRecord[] = [];
+    for (const [key, entry] of Object.entries(section)) {
+      const { name, version } = splitPnpmKey(key);
+      if (!name) continue;
+      records.push({
+        id: rawId(key),
+        name,
+        version,
+        dependencies: Object.entries({
+          ...entry?.dependencies,
+          ...entry?.optionalDependencies,
+        }).map(([child, value]) => reference(child, value)),
+      });
     }
+    for (const [importer, entry] of Object.entries(doc.importers ?? {})) {
+      records.push({
+        id: `importer:${importer}`,
+        name: '__root__',
+        root: true,
+        importer: importer === '.' ? '' : importer,
+        dependencies: Object.entries({
+          ...entry.dependencies,
+          ...entry.devDependencies,
+          ...entry.optionalDependencies,
+        }).map(([child, value]) => reference(child, value)),
+      });
+    }
+    const graph = buildResolutionGraph(records, 'node');
     return graph.size > 0 ? graph : undefined;
   },
 

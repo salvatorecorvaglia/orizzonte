@@ -72,6 +72,7 @@ export interface HttpOptions {
   body?: unknown;
   /** Skip the ETag cache for this request. */
   noCache?: boolean;
+  /** Per-attempt limit; the entire request, including queueing and retries, has a 4× limit. */
   timeoutMs?: number;
 }
 
@@ -79,6 +80,7 @@ interface CachedEntry {
   etag?: string;
   lastModified?: string;
   body: string;
+  bytes: number;
 }
 
 /**
@@ -105,7 +107,7 @@ class HostLimiter {
    */
   acquire(signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) {
-      return Promise.reject(new DOMException('Aborted', 'AbortError'));
+      return Promise.reject(signal.reason);
     }
 
     return new Promise((resolve, reject) => {
@@ -116,7 +118,7 @@ class HostLimiter {
       const onAbort = () => {
         const index = this.queue.indexOf(release);
         if (index >= 0) this.queue.splice(index, 1);
-        reject(new DOMException('Aborted', 'AbortError'));
+        reject(signal?.reason);
       };
 
       this.queue.push(release);
@@ -159,6 +161,11 @@ export class HttpClient {
    * not actually evidence of anything.
    */
   private requests = 0;
+
+  /** Serialized UTF-8 response bytes, not a measurement of V8 heap overhead. */
+  cacheStatistics(): { entries: number; serializedBytes: number } {
+    return { entries: this.etagCache.size, serializedBytes: this.etagBytes };
+  }
 
   get requestCount(): number {
     return this.requests;
@@ -216,19 +223,32 @@ export class HttpClient {
   }
 
   private async request(url: string, options: HttpOptions): Promise<string> {
-    await this.waitForSlot(url, options.signal);
-    /*
-     * The deadline covers the whole retry chain, not each attempt.
-     *
-     * Each attempt already gets its own timeout, but three retries with a
-     * `Retry-After` of up to a minute between them could keep one request
-     * alive for several minutes — with the scan it belongs to still showing a
-     * spinner. Past this point cached data, badged as stale, is a better
-     * answer than a request nobody is still waiting for.
-     */
-    const deadline =
-      Date.now() + (options.timeoutMs ?? DEFAULT_TIMEOUT_MS) * MAX_ATTEMPTS;
-    return this.attempt(url, options, 0, deadline);
+    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    if (
+      !Number.isFinite(timeoutMs) ||
+      timeoutMs <= 0 ||
+      timeoutMs * MAX_ATTEMPTS > 2_147_483_647
+    )
+      throw new RangeError(
+        'HTTP timeout must be a positive finite supported duration.',
+      );
+    const deadline = Date.now() + timeoutMs * MAX_ATTEMPTS;
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () =>
+        controller.abort(
+          new DOMException('HTTP request deadline exceeded', 'TimeoutError'),
+        ),
+      timeoutMs * MAX_ATTEMPTS,
+    );
+    const signal = options.signal
+      ? anySignal([options.signal, controller.signal])
+      : controller.signal;
+    try {
+      return await this.attempt(url, { ...options, signal }, 0, deadline);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -262,6 +282,11 @@ export class HttpClient {
      */
     skipConditional = false,
   ): Promise<string> {
+    options.signal?.throwIfAborted();
+    await this.waitForSlot(url, options.signal);
+    options.signal?.throwIfAborted();
+    if (Date.now() >= deadline)
+      throw new DOMException('HTTP request deadline exceeded', 'TimeoutError');
     const cacheKey = etagCacheKey(url, options.headers);
     const cached =
       options.noCache || skipConditional
@@ -285,9 +310,18 @@ export class HttpClient {
 
     // Combine the caller's cancellation with our own timeout so a hung registry
     // can never wedge a scan.
-    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timeoutMs = Math.min(
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      deadline - Date.now(),
+    );
     const timeoutController = new AbortController();
-    const timer = setTimeout(() => timeoutController.abort(), timeoutMs);
+    const timer = setTimeout(
+      () =>
+        timeoutController.abort(
+          new DOMException('HTTP attempt timed out', 'TimeoutError'),
+        ),
+      timeoutMs,
+    );
     const signal = options.signal
       ? anySignal([options.signal, timeoutController.signal])
       : timeoutController.signal;
@@ -349,7 +383,6 @@ export class HttpClient {
             );
           }
           await sleep(requested, options.signal);
-          await this.waitForSlot(url, options.signal);
           return this.attempt(url, options, retryCount + 1, deadline);
         }
       }
@@ -366,16 +399,30 @@ export class HttpClient {
       }
 
       const body = await response.text();
+      signal.throwIfAborted();
+      if (Date.now() >= deadline)
+        throw new DOMException(
+          'HTTP request deadline exceeded',
+          'TimeoutError',
+        );
 
       if (!options.noCache) {
         const etag = response.headers.get('etag') ?? undefined;
         const lastModified = response.headers.get('last-modified') ?? undefined;
         if (etag || lastModified) {
-          this.rememberResponse(cacheKey, { etag, lastModified, body });
+          this.rememberResponse(cacheKey, {
+            etag,
+            lastModified,
+            body,
+            bytes: Buffer.byteLength(body, 'utf8'),
+          });
         }
       }
 
       return body;
+    } catch (error) {
+      if (signal.aborted) throw signal.reason;
+      throw error;
     } finally {
       clearTimeout(timer);
     }
@@ -392,10 +439,10 @@ export class HttpClient {
 
     // A single response larger than the whole budget is not worth evicting
     // everything else to hold.
-    if (entry.body.length > MAX_CACHED_BYTES) return;
+    if (entry.bytes > MAX_CACHED_BYTES) return;
 
     this.etagCache.set(key, entry);
-    this.etagBytes += entry.body.length;
+    this.etagBytes += entry.bytes;
 
     while (
       this.etagCache.size > MAX_CACHED_RESPONSES ||
@@ -411,7 +458,7 @@ export class HttpClient {
   private forget(key: string): void {
     const existing = this.etagCache.get(key);
     if (!existing) return;
-    this.etagBytes -= existing.body.length;
+    this.etagBytes -= existing.bytes;
     this.etagCache.delete(key);
   }
 }
@@ -474,7 +521,7 @@ async function discardBody(response: Response): Promise<void> {
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(new DOMException('Aborted', 'AbortError'));
+      reject(signal?.reason);
       return;
     }
     const timer = setTimeout(() => {
@@ -483,7 +530,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
-      reject(new DOMException('Aborted', 'AbortError'));
+      reject(signal?.reason);
     };
     signal?.addEventListener('abort', onAbort, { once: true });
   });

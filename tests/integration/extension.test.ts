@@ -59,6 +59,22 @@ describe('scanner discovery', () => {
     api = await getApi();
   });
 
+  it('retains version evidence through the complete scanner pipeline', async () => {
+    const result = await api.scan({ checkUpdates: false });
+    let checked = 0;
+    for (const group of result.groups) {
+      for (const dep of group.dependencies) {
+        if (!dep.installed) continue;
+        checked++;
+        assert.ok(dep.versionResolution, `${dep.name} has no version evidence`);
+        assert.equal(dep.versionResolution.version, dep.installed);
+        if (dep.installedIsApproximate)
+          assert.notEqual(dep.versionResolution.confidence, 'exact');
+      }
+    }
+    assert.ok(checked > 0);
+  });
+
   it('finds a project for every ecosystem in the fixtures', async () => {
     const result = await api.scan({ checkUpdates: false });
 
@@ -172,6 +188,22 @@ describe('scanner discovery', () => {
     );
     // version.ref = "junit" must resolve through the [versions] table.
     assert.equal(junit?.declared, '5.10.2');
+  });
+
+  it('retains target-specific Cargo declarations through scanning', async () => {
+    const result = await api.scan({ checkUpdates: false });
+    const rust = result.groups.find((group) => group.ecosystem === 'cargo');
+    assert.ok(rust);
+    const serde = rust.dependencies.filter((dep) => dep.name === 'serde');
+    assert.equal(serde.length, 2);
+    assert.equal(new Set(serde.map((dep) => dep.key)).size, 2);
+    assert.ok(serde.some((dep) => dep.cargoTarget === 'cfg(windows)'));
+    assert.ok(
+      rust.dependencies.some(
+        (dep) =>
+          dep.cargoTarget === 'wasm32-unknown-unknown' && dep.scope === 'dev',
+      ),
+    );
   });
 
   it('separates requirements.txt from pyproject.toml', async () => {

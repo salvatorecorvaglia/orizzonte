@@ -120,7 +120,7 @@
     "viewsWelcome": [
       {
         "view": "orizzonte.sidebar",
-        "contents": "See every dependency in this workspace, with updates, vulnerabilities and licenses, across npm, PyPI, Cargo, Go, Composer, Maven and Gradle.\n[Open Orizzonte](command:orizzonte.open)\n[Search Packages](command:orizzonte.searchInstall)\n[Source code](https://github.com/salvatorecorvaglia/orizzonte) · [Report an issue](https://github.com/salvatorecorvaglia/orizzonte/issues) · [Release notes](https://github.com/salvatorecorvaglia/orizzonte/releases)"
+        "contents": "See every dependency in this workspace, with updates, vulnerabilities and licenses, across npm, PyPI, Cargo, Go, Composer, Maven and Gradle.\n[Open Orizzonte](command:orizzonte.open)\n[Search Packages](command:orizzonte.searchInstall)\n[Source code](https://github.com/salvatorecorvaglia/orizzonte) \u00b7 [Report an issue](https://github.com/salvatorecorvaglia/orizzonte/issues) \u00b7 [Release notes](https://github.com/salvatorecorvaglia/orizzonte/releases)"
       }
     ],
     "menus": {
@@ -221,12 +221,12 @@
             "**/fixtures/**",
             "**/__tests__/**"
           ],
-          "description": "Glob patterns to skip when scanning for manifest files. The defaults also skip test, tests, fixtures and __tests__ directories, so test fixtures do not show up as projects — remove those entries to scan a real project that lives under one."
+          "description": "Glob patterns to skip when scanning for manifest files. The defaults also skip test, tests, fixtures and __tests__ directories, so test fixtures do not show up as projects \u2014 remove those entries to scan a real project that lives under one."
         },
         "orizzonte.registryOverrides": {
           "type": "object",
           "default": {},
-          "description": "Override registry base URLs per ecosystem. A value can be a bare URL, e.g. { \"npm\": \"https://registry.mycompany.com\" }, or an object naming an environment variable that holds a bearer token for that registry, e.g. { \"npm\": { \"url\": \"https://registry.mycompany.com\", \"tokenEnvVar\": \"COMPANY_NPM_TOKEN\" } } — Orizzonte reads the token from that variable at request time and never stores it. The token is only sent when the entry is in your User settings, never from a workspace's settings.json. For maven and gradle, the URL is a Maven repository base (e.g. https://nexus.example.com/repository/maven-public), read through its maven-metadata.xml files; a Solr search endpoint is still accepted. Ignored in untrusted workspaces.",
+          "description": "Override registry base URLs per ecosystem. A value can be a bare URL, e.g. { \"npm\": \"https://registry.mycompany.com\" }, or an object naming an environment variable that holds a bearer token for that registry, e.g. { \"npm\": { \"url\": \"https://registry.mycompany.com\", \"tokenEnvVar\": \"COMPANY_NPM_TOKEN\" } } \u2014 Orizzonte reads the token from that variable at request time and never stores it. The token is only sent when the entry is in your User settings, never from a workspace's settings.json. For maven and gradle, the URL is a Maven repository base (e.g. https://nexus.example.com/repository/maven-public), read through its maven-metadata.xml files; a Solr search endpoint is still accepted. Ignored in untrusted workspaces.",
           "additionalProperties": {
             "oneOf": [
               {
@@ -262,7 +262,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "If non-empty, only these licenses (e.g. \"MIT\", \"Apache-2.0\") pass the License summary check — everything else, including an unrecognized license, is flagged. Takes precedence over licenseDenyList."
+          "description": "If non-empty, only these licenses (e.g. \"MIT\", \"Apache-2.0\") pass the License summary check \u2014 everything else, including an unrecognized license, is flagged. Takes precedence over licenseDenyList."
         },
         "orizzonte.licenseDenyList": {
           "type": "array",
@@ -293,7 +293,8 @@
     "test:all": "pnpm run test && pnpm run test:integration",
     "package": "vsce package --no-dependencies",
     "publish:ovsx": "ovsx publish *.vsix",
-    "test:browser": "pnpm run build && playwright test"
+    "test:browser": "pnpm run build && playwright test",
+    "benchmark": "node --expose-gc scripts/benchmark.mjs"
   },
   "dependencies": {
     "fast-xml-parser": "^5.12.0",
@@ -324,12 +325,12 @@
     "@vscode/vsce": "^4.1.0",
     "concurrently": "^10.0.6",
     "esbuild": "^0.28.2",
-    "jsdom": "^30.1.3",
+    "jsdom": "^31.0.0",
     "ovsx": "^1.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5",
+    "vite": "^8.3.6",
     "vitest": "^5.1.0"
   }
 }

@@ -140,7 +140,6 @@ jobs:
   audit:
     name: Dependency Audit
     runs-on: ubuntu-24.04
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6

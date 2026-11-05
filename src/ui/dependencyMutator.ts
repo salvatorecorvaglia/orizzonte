@@ -9,6 +9,14 @@
 
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import {
+  isRelatedMetadata,
+  matchesMutationSnapshot,
+} from '../core/manifestMutationPolicy.js';
+import type { MutationResult } from '../core/mutationBatch.js';
+
+export type { MutationResult } from '../core/mutationBatch.js';
+
 import { SerialQueue } from '../core/serialQueue.js';
 import type { Dependency, DepScope, Toolchain } from '../core/types.js';
 import { isUpdatable } from '../core/vocabulary.js';
@@ -17,6 +25,7 @@ import type {
   EcosystemProvider,
   ProviderContext,
 } from '../providers/provider.js';
+import { providerForPath } from '../providers/registry.js';
 import type { TerminalRunner } from './terminalRunner.js';
 
 type ManifestEdit = Parameters<
@@ -34,10 +43,12 @@ type ManifestEdit = Parameters<
  */
 export type ToolchainCache = Map<string, Toolchain>;
 
-export type MutationResult = 'applied' | 'unsupported' | 'failed' | 'pending';
-
 export class DependencyMutator {
   private readonly queue = new SerialQueue();
+  private readonly bulkSnapshots = new WeakMap<
+    Command,
+    { manifestPath: string; text: string }
+  >();
   constructor(
     private readonly ctx: ProviderContext,
     private readonly terminal: TerminalRunner,
@@ -84,20 +95,30 @@ export class DependencyMutator {
   ): Promise<MutationResult> {
     return this.queue.run(async () => {
       requireWorkspaceTrust();
-      if (!isUpdatable(dep)) return 'unsupported';
+      if (
+        !isUpdatable(dep) ||
+        provider.canMutateDependency?.(dep, 'update') === false
+      )
+        return 'unsupported';
       const toolchain = await this.toolchainFor(
         provider,
         dep.manifestPath,
         toolchains,
       );
       const command = provider.updateCommand(toolchain, dep, toVersion);
-      return this.apply(provider, dep.manifestPath, command, {
-        kind: 'update',
-        name: dep.name,
-        version: toVersion,
-        scope: dep.scope,
-        declaration: dep.declaration,
-      });
+      return this.apply(
+        provider,
+        dep.manifestPath,
+        command,
+        {
+          kind: 'update',
+          name: dep.name,
+          version: toVersion,
+          scope: dep.scope,
+          declaration: dep.declaration,
+        },
+        dep,
+      );
     });
   }
 
@@ -108,17 +129,25 @@ export class DependencyMutator {
   ): Promise<MutationResult> {
     return this.queue.run(async () => {
       requireWorkspaceTrust();
+      if (provider.canMutateDependency?.(dep, 'remove') === false)
+        return 'unsupported';
       const toolchain = await this.toolchainFor(
         provider,
         dep.manifestPath,
         toolchains,
       );
       const command = provider.uninstallCommand(toolchain, dep);
-      return this.apply(provider, dep.manifestPath, command, {
-        kind: 'remove',
-        name: dep.name,
-        scope: dep.scope,
-      });
+      return this.apply(
+        provider,
+        dep.manifestPath,
+        command,
+        {
+          kind: 'remove',
+          name: dep.name,
+          scope: dep.scope,
+        },
+        dep,
+      );
     });
   }
 
@@ -133,14 +162,48 @@ export class DependencyMutator {
   ): Promise<Command | null> {
     requireWorkspaceTrust();
     const toolchain = await provider.detectToolchain(manifestPath, this.ctx);
-    return provider.updateAllCommand(toolchain);
+    const command = provider.updateAllCommand(toolchain);
+    if (command) {
+      const document = await vscode.workspace.openTextDocument(
+        vscode.Uri.file(manifestPath),
+      );
+      this.bulkSnapshots.set(command, {
+        manifestPath,
+        text: document.getText(),
+      });
+    }
+    return command;
   }
 
   /** Runs a command from `bulkUpdateCommand`. */
-  async runBulkUpdate(command: Command): Promise<MutationResult> {
-    return this.queue.run(() => {
+  async runBulkUpdate(
+    command: Command,
+    manifestPath: string,
+  ): Promise<MutationResult> {
+    return this.queue.run(async () => {
       requireWorkspaceTrust();
-      return this.runCommand(command.argv, command.cwd, command.description);
+      const snapshot = this.bulkSnapshots.get(command);
+      const preflight = async () => {
+        await this.preflight(command, manifestPath);
+        const document = await vscode.workspace.openTextDocument(
+          vscode.Uri.file(manifestPath),
+        );
+        if (
+          snapshot &&
+          (snapshot.manifestPath !== manifestPath ||
+            document.getText() !== snapshot.text)
+        )
+          throw new Error(
+            'The manifest changed after the bulk update was prepared. Refresh and retry.',
+          );
+      };
+      await preflight();
+      return this.runCommand(
+        command.argv,
+        command.cwd,
+        command.description,
+        preflight,
+      );
     });
   }
 
@@ -180,6 +243,7 @@ export class DependencyMutator {
     manifestPath: string,
     command: Command | null,
     edit: ManifestEdit,
+    original?: Dependency,
   ): Promise<MutationResult> {
     requireWorkspaceTrust();
     let snapshot:
@@ -200,11 +264,16 @@ export class DependencyMutator {
         return 'unsupported';
       snapshot = { document, version: document.version };
     }
+    const preflight = command
+      ? () => this.preflight(command, manifestPath, provider, original)
+      : undefined;
+    if (preflight) await preflight();
     if (command) {
       const outcome = await this.runCommand(
         command.argv,
         command.cwd,
         command.description,
+        preflight,
       );
       if (outcome !== 'applied' || command.writesManifest !== false)
         return outcome;
@@ -216,6 +285,61 @@ export class DependencyMutator {
       }
     }
     return this.applyManifestEdit(provider, manifestPath, edit);
+  }
+
+  /** Validate again at terminal dispatch, after any shell startup or queue wait. */
+  private async preflight(
+    command: Command,
+    manifestPath: string,
+    provider?: EcosystemProvider,
+    original?: Dependency,
+  ): Promise<void> {
+    requireWorkspaceTrust();
+    const document = await vscode.workspace.openTextDocument(
+      vscode.Uri.file(manifestPath),
+    );
+    const activeProvider = provider ?? providerForPath(manifestPath);
+    const documents = new Set([
+      document,
+      ...(vscode.workspace.textDocuments ?? []),
+    ]);
+    for (const open of documents) {
+      const file = open.uri?.fsPath;
+      const relatedMetadata =
+        file &&
+        activeProvider &&
+        isRelatedMetadata(file, command.cwd, activeProvider);
+      if (open === document || relatedMetadata) {
+        if (open.isDirty)
+          throw new Error(
+            'Save the manifest and related project files before running a package manager, then retry the operation.',
+          );
+      }
+    }
+    if (!original || !provider) return;
+    const version = document.version;
+    const manifest = await provider.parse(
+      manifestPath,
+      document.getText(),
+      this.ctx,
+    );
+    const current = manifest.dependencies.find(
+      (dep) => dep.key === original.key,
+    );
+    // Legacy callers without declaration metadata are checked for CLI-backed
+    // manifest writes; parsed Python requirements are always checked.
+    if (
+      (command.writesManifest !== false || original.pythonRequirement) &&
+      !matchesMutationSnapshot(current, original)
+    ) {
+      throw new Error(
+        'The dependency declaration changed since the last scan. Refresh and retry the operation.',
+      );
+    }
+    if (document.isDirty || document.version !== version)
+      throw new Error(
+        'The manifest changed during validation. Refresh and retry the operation.',
+      );
   }
 
   /**
@@ -235,11 +359,15 @@ export class DependencyMutator {
     argv: string[],
     cwd: string,
     description: string,
+    preflight?: () => Promise<void>,
   ): Promise<MutationResult> {
     const doneBusy = this.beginBusy(description);
     let exitCode: number | undefined;
     try {
-      ({ exitCode } = await this.terminal.run({ argv, cwd, description }));
+      ({ exitCode } = await this.terminal.run(
+        { argv, cwd, description },
+        preflight,
+      ));
     } finally {
       doneBusy();
     }

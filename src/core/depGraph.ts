@@ -13,7 +13,6 @@ import { providerFor } from '../providers/registry.js';
 import {
   type ForwardGraph,
   lockfilesFor,
-  NPM_ROOT,
   type VersionMap,
 } from './lockfiles/index.js';
 import {
@@ -34,6 +33,7 @@ import type {
   DuplicateVersionResult,
   Ecosystem,
 } from './types.js';
+import { compareVersions } from './versions/index.js';
 import { isRegistryPackage, registryNameOf } from './vocabulary.js';
 
 const MAX_DEPTH = 8;
@@ -60,6 +60,7 @@ const MAX_REGISTRY_CHILDREN = 50;
 export interface WhyResult {
   roots: DepNode[];
   source: 'lockfile' | 'registry';
+  partial?: boolean;
 }
 
 /**
@@ -82,12 +83,35 @@ export async function explainDependency(
     // The lookup key must go through the same normalisation the graph keys did,
     // or a manifest that declares `Jinja2` will never match a lockfile that
     // records `jinja2`.
+    const name = graphKey(registryNameOf(target), target.ecosystem);
+    const candidates = [...forward.values()].filter(
+      (node) => !node.root && node.name === name,
+    );
+    const knownVersion = target.installed && !target.installedIsApproximate;
+    const matching = knownVersion
+      ? candidates.filter(
+          (node) =>
+            node.version !== undefined &&
+            compareVersions(
+              target.ecosystem,
+              node.version,
+              target.installed!,
+            ) === 0,
+        )
+      : candidates;
     const roots = tracePaths(
       forward,
-      graphKey(registryNameOf(target), target.ecosystem),
+      matching.map((node) => node.id),
     );
     if (roots.length > 0) {
-      return { roots, source: 'lockfile' };
+      return {
+        roots,
+        source: 'lockfile',
+        partial:
+          matching.length > 1 ||
+          [...forward.values()].some((node) => node.truncated) ||
+          roots.some((node) => node.truncated),
+      };
     }
   }
 
@@ -121,9 +145,33 @@ async function buildForwardGraph(
     lockfilesFor(target.ecosystem),
     (absolutePath) => ctx.readFile(absolutePath),
     ctx.workspaceRootFor(target.manifestPath),
-    (lockfile, text) => {
-      const graph = lockfile.edges(text);
-      return graph && graph.size > 0 ? graph : undefined;
+    (lockfile, text, absolutePath) => {
+      let graph: ForwardGraph | undefined;
+      try {
+        graph = lockfile.edges(text);
+      } catch {
+        return undefined;
+      }
+      if (!graph || graph.size === 0) return undefined;
+      const importer = path
+        .relative(path.dirname(absolutePath), dir)
+        .split(path.sep)
+        .join('/');
+      const roots = [...graph.values()].filter(
+        (node) => node.root && node.importer === importer,
+      );
+      if (roots.length === 0) return graph;
+      const reachable: ForwardGraph = new Map();
+      const pending = roots.map((node) => node.id);
+      while (pending.length) {
+        const id = pending.pop()!;
+        if (reachable.has(id)) continue;
+        const node = graph.get(id);
+        if (!node) continue;
+        reachable.set(id, node);
+        pending.push(...node.children);
+      }
+      return reachable;
     },
   );
 }
@@ -132,18 +180,18 @@ async function buildForwardGraph(
  * Walks the graph backwards from `target` to every package that requires it,
  * then returns those chains root-first.
  */
-function tracePaths(graph: ForwardGraph, target: string): DepNode[] {
+function tracePaths(graph: ForwardGraph, targets: string[]): DepNode[] {
   // Invert once; a package can have many dependents.
   const reverse = new Map<string, string[]>();
-  for (const [parent, children] of graph) {
-    for (const child of children) {
+  for (const [parent, node] of graph) {
+    for (const child of node.children) {
       const list = reverse.get(child);
       if (list) list.push(parent);
       else reverse.set(child, [parent]);
     }
   }
 
-  if (!reverse.has(target)) return [];
+  if (targets.length === 0) return [];
 
   const chains: string[][] = [];
   /** True when the budget stopped the walk, so the UI can say the tree is partial. */
@@ -170,7 +218,7 @@ function tracePaths(graph: ForwardGraph, target: string): DepNode[] {
       return;
     }
     const parents = reverse.get(name);
-    if (!parents || parents.length === 0 || name === NPM_ROOT) {
+    if (!parents || parents.length === 0 || graph.get(name)?.root) {
       chains.push([...chain]);
       return;
     }
@@ -186,7 +234,7 @@ function tracePaths(graph: ForwardGraph, target: string): DepNode[] {
       }
       if (visited.has(parent)) continue; // cycle guard
       advanced = true;
-      if (parent === NPM_ROOT) {
+      if (graph.get(parent)?.root) {
         chains.push([...chain]);
         continue;
       }
@@ -200,7 +248,13 @@ function tracePaths(graph: ForwardGraph, target: string): DepNode[] {
     }
   };
 
-  walk(target, [target], new Set([target]));
+  for (const target of targets) {
+    if (chains.length >= MAX_CHAINS) {
+      truncated = true;
+      break;
+    }
+    walk(target, [target], new Set([target]));
+  }
 
   // Fold the chains into a tree so shared prefixes render once.
   const roots: DepNode[] = [];
@@ -208,9 +262,16 @@ function tracePaths(graph: ForwardGraph, target: string): DepNode[] {
     let level = roots;
     let node: DepNode | undefined;
     for (const name of chain) {
-      node = level.find((candidate) => candidate.name === name);
+      node = level.find((candidate) => candidate.id === name);
       if (!node) {
-        node = { name, children: [] };
+        const resolved = graph.get(name);
+        node = {
+          id: name,
+          name: resolved?.name ?? name,
+          version: resolved?.version,
+          truncated: resolved?.truncated,
+          children: [],
+        };
         level.push(node);
       }
       level = node.children;
@@ -222,6 +283,7 @@ function tracePaths(graph: ForwardGraph, target: string): DepNode[] {
     }
   }
 
+  if (truncated) for (const root of roots) root.truncated = true;
   return roots;
 }
 
@@ -299,6 +361,7 @@ async function buildFromDepsDev(
     let budget = MAX_REGISTRY_NODES;
 
     const reference = (index: number, range?: string): DepNode => ({
+      id: `registry:${index}`,
       name: response.nodes[index].versionKey.name,
       version: response.nodes[index].versionKey.version,
       requestedRange: range,
@@ -309,6 +372,7 @@ async function buildFromDepsDev(
     const expand = (index: number, depth: number): DepNode => {
       const source = response.nodes[index];
       const node: DepNode = {
+        id: `registry:${index}`,
         name: source.versionKey.name,
         version: source.versionKey.version,
         children: [],

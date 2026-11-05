@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Cargo target-specific dependency discovery, with target context in the dependency table and package details.
+- Performance benchmarks for scanning, version enrichment and cache usage, available through `pnpm benchmark`.
+
+### Changed
+
+- Dependency inspection now preserves separate lockfile resolution identities and resolved versions, marks incomplete paths as partial, and labels registry fallback trees as package dependencies.
+- Reuse version calculations across matching dependency declarations and share concurrent Python index requests to reduce repeated work.
+- Updated runtime dependencies, development tools and publishing dependencies.
+
+### Fixed
+
+- Track version-resolution evidence across lockfile formats so inferred or ambiguous versions are excluded from vulnerability audits.
+- Preserve Python requirement extras, environment markers and group identities, and require manual edits when an automated mutation cannot safely target a declaration.
+- Revalidate dependency declarations and related unsaved manifests and lockfiles before package-manager commands, including queued and bulk updates.
+- Verify terminal working directories and shell quoting before execution, prevent overlapping terminal commands, and stop mutation batches when command completion is unknown.
+- Keep bulk-selection controls available when filters hide every selected dependency, show the hidden selection count, and clear text, scope and status filters together.
+- Apply HTTP deadlines to queueing, retries and response reads, preserve cancellation reasons, and measure cached responses in UTF-8 bytes.
+
+### Security
+
+- Suppress public registry lookups and audits for Python, Maven and Gradle dependencies whose repository configuration leaves their source uncertain.
+- Override vulnerable transitive `glob` and `minimatch` versions in the test and packaging toolchains.
+
 ## [1.2.0] - 2026-10-28
 
 ### Added

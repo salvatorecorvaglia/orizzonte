@@ -163,6 +163,20 @@ export interface PackageMeta {
   license?: string;
 }
 
+/** Evidence for a displayed current version; only exact evidence may be audited. */
+export interface VersionResolution {
+  version?: string;
+  source:
+    | 'lockfile-importer'
+    | 'lockfile-descriptor'
+    | 'lockfile-single'
+    | 'lockfile-range'
+    | 'declaration'
+    | 'constraint'
+    | 'unresolved';
+  confidence: 'exact' | 'inferred' | 'unknown';
+}
+
 export interface Dependency {
   /** Stable identity across refreshes: `${manifestPath}::${scope}::${name}`. */
   key: string;
@@ -173,9 +187,10 @@ export interface Dependency {
   declared: string;
   /** The concrete version currently resolved, when a lockfile tells us. */
   installed?: string;
+  versionResolution?: VersionResolution;
   /**
-   * True when `installed` was inferred from the constraint rather than read
-   * from a lockfile.
+   * True when `installed` is inferred rather than an exact resolution,
+   * including an ambiguous lockfile range fallback.
    *
    * It matters because advisories are matched against `installed`: a guess of
    * `1.2.3` from `^1.2.3` may name a version nobody has, so anything derived
@@ -203,6 +218,15 @@ export interface Dependency {
   group?: DependencyGroup;
   /** Provider-owned declaration identity, such as a Gradle configuration or catalog alias. */
   declaration?: string;
+  /** Cargo target table predicate or target triple; absent for unconditional declarations. */
+  cargoTarget?: string;
+  /** Python requirement semantics retained independently of its version constraint. */
+  pythonRequirement?: {
+    raw?: string;
+    extras: string[];
+    marker?: string;
+    requiresManualMutation?: boolean;
+  };
 }
 
 export interface ParsedManifest {
@@ -262,6 +286,8 @@ export interface SearchResult {
 
 /** A node in the "why is this installed" reverse-dependency tree. */
 export interface DepNode {
+  /** Stable resolution identity, including install path or source when available. */
+  id?: string;
   name: string;
   version?: string;
   /** The constraint the parent asked for. */

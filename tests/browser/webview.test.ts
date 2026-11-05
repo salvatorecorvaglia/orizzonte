@@ -112,9 +112,43 @@ for (const { width, theme, zoom, contrast } of scenarios) {
     ).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(
+      page.getByRole('row', { selected: false }).filter({ hasText: 'pkg-199' }),
+    ).toBeFocused();
+    await page
+      .getByRole('checkbox', { name: 'Select pkg-199', exact: true })
+      .check();
+    await page
+      .getByRole('searchbox', { name: 'Filter installed packages' })
+      .fill('no-matching-package');
+    await expect(
+      page.getByText('No dependencies match your filters'),
+    ).toBeVisible();
+    await expect(page.getByText(/1 hidden by filters/)).toBeVisible();
+    const clearSelection = page.getByRole('button', {
+      name: 'Clear selection',
+      exact: true,
+    });
+    await expect(clearSelection).toBeInViewport();
+    const bounds = await clearSelection.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    await page.screenshot({
+      path: test.info().outputPath('hidden-selection.png'),
+    });
+    await clearSelection.click();
+    await expect(page.getByText(/hidden by filters/)).toHaveCount(0);
+    await page
+      .getByRole('button', { name: 'Clear filters', exact: true })
+      .click();
+    await expect(page.getByRole('grid')).toBeVisible();
     await page.evaluate(
       `window.postMessage({ type: 'scanning', busy: true, label: 'Checking registries' }, '*')`,
     );
+    await expect(
+      page.getByRole('button', { name: 'Check updates', exact: true }),
+    ).toBeDisabled();
     await page.getByRole('button', { name: 'Add package' }).focus();
     await page.keyboard.press('ArrowRight');
     await expect(page.getByRole('button', { name: 'More' })).toBeFocused();

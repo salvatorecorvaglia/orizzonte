@@ -15,6 +15,8 @@
 
 import * as path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
+import { isConcreteVersion } from '../../core/concreteVersion.js';
+import { protectUncertainSources } from '../../core/sourcePrivacy.js';
 import type {
   Dependency,
   DepScope,
@@ -76,10 +78,11 @@ export class GradleProvider implements EcosystemProvider {
     text: string,
     _ctx: ProviderContext,
   ): Promise<ParsedManifest> {
-    if (path.basename(absolutePath) === 'libs.versions.toml') {
-      return this.parseVersionCatalog(absolutePath, text);
-    }
-    return this.parseBuildScript(absolutePath, text);
+    const manifest =
+      path.basename(absolutePath) === 'libs.versions.toml'
+        ? this.parseVersionCatalog(absolutePath, text)
+        : this.parseBuildScript(absolutePath, text);
+    return protectUncertainSources(manifest, text, _ctx);
   }
 
   /**
@@ -119,7 +122,10 @@ export class GradleProvider implements EcosystemProvider {
         ecosystem: 'gradle',
         scope: 'prod',
         declared: parsed.version ?? 'unspecified',
-        installed: parsed.version,
+        installed:
+          parsed.version && isConcreteVersion('gradle', parsed.version)
+            ? parsed.version
+            : undefined,
         updateKind: 'unknown',
         vulnerabilities: [],
         manifestPath: absolutePath,
@@ -160,7 +166,7 @@ export class GradleProvider implements EcosystemProvider {
 
       // A version that is still a Gradle interpolation is not a real version.
       const literalVersion =
-        version && !version.includes('$') ? version : undefined;
+        version && isConcreteVersion('gradle', version) ? version : undefined;
 
       dependencies.push({
         key: dependencyKey(absolutePath, scope, `${configuration}:${name}`),
@@ -168,7 +174,7 @@ export class GradleProvider implements EcosystemProvider {
         name,
         ecosystem: 'gradle',
         scope,
-        declared: literalVersion ?? 'unspecified',
+        declared: version && !version.includes('$') ? version : 'unspecified',
         installed: literalVersion,
         updateKind: 'unknown',
         vulnerabilities: [],

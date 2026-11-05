@@ -8,7 +8,7 @@
 
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { ProviderContext, VersionInfo } from '../providers/provider.js';
+import type { ProviderContext } from '../providers/provider.js';
 import {
   manifestGlob,
   PROVIDERS,
@@ -17,6 +17,7 @@ import {
 } from '../providers/registry.js';
 import { mapWithConcurrency } from '../providers/shared/concurrency.js';
 import { auditDependencies } from './audit.js';
+import { isConcreteVersion } from './concreteVersion.js';
 import { ManifestIgnore } from './manifestIgnore.js';
 import { canLookupDependency } from './registryAccess.js';
 import type {
@@ -28,13 +29,8 @@ import type {
   ScanSummary,
   SearchResult,
 } from './types.js';
-import {
-  classifyUpdate,
-  constraintToApproxVersion,
-  maxSatisfying,
-  maxVersion,
-  registryConstraint,
-} from './versions/index.js';
+import { enrichVersionGroups } from './versionEnrichment.js';
+import { constraintToApproxVersion } from './versions/index.js';
 import { hasUpdate, isRegistryPackage, registryNameOf } from './vocabulary.js';
 import { assignWorkspaces, readSidecarMembers } from './workspaces.js';
 
@@ -210,7 +206,7 @@ export class Scanner {
       // Only a total failure means "stale". One unreachable registry should
       // grey out its own ecosystem's rows, not relabel results that arrived
       // perfectly well from the other six.
-      stale = await this.enrichVersions(groups, signal);
+      stale = await enrichVersionGroups(groups, this.ctx, signal);
       signal.throwIfAborted();
 
       // Deliberately outside the version-lookup outcome: advisories come from
@@ -403,6 +399,7 @@ export class Scanner {
             // Most lockfiles key by the name the manifest uses; Cargo's keys
             // by the crate's real name, which a `package =` rename changes.
             const name = provider.lockfileName?.(dep) ?? dep.name;
+            if (dep.versionResolution) continue;
             dep.installed ??=
               resolved.get(name) ??
               resolved.get(name.toLowerCase()) ??
@@ -418,12 +415,32 @@ export class Scanner {
     // shows a number rather than a blank cell — but record that it is a
     // guess, because the audit matches advisories against this value.
     for (const dep of manifest.dependencies) {
-      if (dep.installed !== undefined) continue;
+      if (dep.installed !== undefined) {
+        dep.versionResolution ??= {
+          version: dep.installed,
+          source: 'declaration',
+          confidence: isConcreteVersion(dep.ecosystem, dep.installed)
+            ? 'exact'
+            : 'unknown',
+        };
+        continue;
+      }
       if (!isRegistryPackage(dep)) continue;
       const approximate = constraintToApproxVersion(dep.declared);
-      if (approximate === undefined) continue;
+      if (approximate === undefined) {
+        dep.versionResolution ??= {
+          source: 'unresolved',
+          confidence: 'unknown',
+        };
+        continue;
+      }
       dep.installed = approximate;
       dep.installedIsApproximate = true;
+      dep.versionResolution = {
+        version: approximate,
+        source: 'constraint',
+        confidence: 'inferred',
+      };
     }
 
     return {
@@ -469,108 +486,6 @@ export class Scanner {
     }
   }
 
-  /**
-   * One batched registry round-trip per ecosystem, then merge the results.
-   *
-   * Returns true only when *every* ecosystem failed, which is the one case that
-   * genuinely means "you are looking at cached data". Ecosystems are isolated
-   * from each other: a provider that throws marks its own dependencies
-   * `lookupFailed` and leaves the rest untouched.
-   */
-  private async enrichVersions(
-    groups: ProjectGroup[],
-    signal: AbortSignal,
-  ): Promise<boolean> {
-    /*
-     * Index the dependencies by ecosystem once, and hand each merge step only
-     * the rows it can act on.
-     *
-     * Both merge steps used to re-walk every group and every dependency and
-     * skip what did not match, so the cost was the number of ecosystems times
-     * the size of the whole workspace rather than the size of the workspace.
-     */
-    const byEcosystem = new Map<Ecosystem, Dependency[]>();
-    for (const group of groups) {
-      for (const dep of group.dependencies) {
-        // A workspace sibling, local path or git checkout shares a name with
-        // whatever the public registry holds under it, and nothing else.
-        if (!canLookupDependency(dep, this.ctx)) continue;
-        const existing = byEcosystem.get(dep.ecosystem);
-        if (existing) existing.push(dep);
-        else byEcosystem.set(dep.ecosystem, [dep]);
-      }
-    }
-
-    if (byEcosystem.size === 0) return false;
-
-    const outcomes = await Promise.all(
-      [...byEcosystem.entries()].map(async ([ecosystem, dependencies]) => {
-        const provider = providerFor(ecosystem);
-        const names = [
-          ...new Set(dependencies.map((dep) => registryNameOf(dep))),
-        ];
-
-        let versions: Map<string, VersionInfo>;
-        try {
-          versions = await provider.fetchVersions(names, this.ctx, signal);
-        } catch (error) {
-          // An abort is the caller's decision, not a registry failure, so it
-          // propagates rather than being reported as an unreachable ecosystem.
-          if (signal.aborted) throw error;
-          markLookupFailed(dependencies);
-          return false;
-        }
-
-        this.applyVersions(dependencies, ecosystem, versions);
-        return dependencies.some((dep) => {
-          const info = versions.get(registryNameOf(dep));
-          return info && info.versions.length > 0 && !info.stale;
-        });
-      }),
-    );
-
-    return outcomes.every((succeeded) => !succeeded);
-  }
-
-  private applyVersions(
-    dependencies: Dependency[],
-    ecosystem: Ecosystem,
-    versions: Map<string, VersionInfo>,
-  ): void {
-    for (const dep of dependencies) {
-      const info = versions.get(registryNameOf(dep));
-      if (!info || info.versions.length === 0) {
-        dep.lookupFailed = true;
-        dep.updateKind = 'unknown';
-        continue;
-      }
-
-      dep.latest = info.latest ?? maxVersion(ecosystem, info.versions);
-      dep.lookupFailed = info.stale || undefined;
-      dep.wanted =
-        maxSatisfying(
-          ecosystem,
-          info.versions,
-          registryConstraint(dep.declared),
-        ) ?? dep.installed;
-
-      if (info.deprecated || info.sizeBytes !== undefined) {
-        dep.meta = {
-          ...(dep.meta ?? { name: dep.name }),
-          ...(info.deprecated ? { deprecated: info.deprecated } : {}),
-          ...(info.sizeBytes !== undefined
-            ? { sizeBytes: info.sizeBytes }
-            : {}),
-        };
-      }
-
-      // Compare against what is actually resolved, falling back to the
-      // constraint's lower bound when nothing pins an exact version.
-      const current = dep.installed ?? constraintToApproxVersion(dep.declared);
-      dep.updateKind = classifyUpdate(ecosystem, current, dep.latest);
-    }
-  }
-
   /** Fetches rich metadata for a single package, on demand from the drawer. */
   async fetchDetails(dep: Dependency, signal?: AbortSignal) {
     if (!canLookupDependency(dep, this.ctx)) return undefined;
@@ -606,14 +521,6 @@ export class Scanner {
     });
 
     return { results, failed };
-  }
-}
-
-/** An unreachable registry greys out its own rows and asserts nothing else. */
-function markLookupFailed(dependencies: Dependency[]): void {
-  for (const dep of dependencies) {
-    dep.lookupFailed = true;
-    dep.updateKind = 'unknown';
   }
 }
 

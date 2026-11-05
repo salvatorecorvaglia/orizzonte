@@ -48,6 +48,7 @@ import {
   declaredLabel,
   hasUpdate,
   isUpdatable,
+  notUpdatableReason,
   scopeLabel,
   sourceLabel,
   statusRank,
@@ -362,6 +363,72 @@ export function DepTable({
     return sort.direction === 'asc' ? 'ascending' : 'descending';
   };
 
+  const hiddenSelectedCount = useMemo(
+    () =>
+      selectedDepKeys.size -
+      allDepKeys.filter((key) => selectedDepKeys.has(key)).length,
+    [allDepKeys, selectedDepKeys],
+  );
+  const selectionBar = selectedDepKeys.size > 0 && (
+    <div
+      className="table__bulk-bar"
+      role="toolbar"
+      aria-label={`Actions for ${selectedDepKeys.size} selected package(s)`}
+    >
+      <span className="table__bulk-info" role="status" aria-atomic="true">
+        Selected <strong>{selectedDepKeys.size}</strong> package(s)
+        {hiddenSelectedCount > 0 && (
+          <span> · {hiddenSelectedCount} hidden by filters</span>
+        )}
+      </span>
+      <div className="table__bulk-actions">
+        {/*
+         * The labels are wrapped in the same span the row actions use, so
+         * the one rule that drops words for icons on a narrow panel covers
+         * both. `aria-label` carries the full wording, which is what makes
+         * losing the visible text survivable.
+         */}
+        {onBulkUpdateSelected && (
+          <button
+            type="button"
+            className="btn-update-primary"
+            aria-label="Update selected packages"
+            title="Update selected packages"
+            disabled={busy}
+            onClick={onBulkUpdateSelected}
+          >
+            <Icon name="arrow-up" />{' '}
+            <span className="row-action__label">Update Selected</span>
+          </button>
+        )}
+        {onBulkRemoveSelected && (
+          <button
+            type="button"
+            className="danger"
+            aria-label="Remove selected packages"
+            title="Remove selected packages"
+            disabled={busy}
+            onClick={onBulkRemoveSelected}
+          >
+            <Icon name="trash" />{' '}
+            <span className="row-action__label">Remove Selected</span>
+          </button>
+        )}
+        {/* Clearing a selection writes nothing, so a scan does not block it. */}
+        <button
+          type="button"
+          className="ghost"
+          aria-label="Clear selection"
+          title="Clear selection"
+          onClick={() => onToggleSelectAll?.([])}
+        >
+          <Icon name="close" />{' '}
+          <span className="row-action__label">Clear selection</span>
+        </button>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="empty" role="status">
@@ -372,25 +439,30 @@ export function DepTable({
   }
 
   if (rows.length === 0) {
-    return filtering ? (
-      <div className="empty">
-        <h2>No dependencies match your filters</h2>
-        <p>Clear the search box and re-enable the scopes to see everything.</p>
-        <button
-          type="button"
-          className="empty__action secondary"
-          onClick={onClearFilters}
-        >
-          Clear filters
-        </button>
-      </div>
-    ) : (
-      <div className="empty">
-        <h2>No dependencies declared</h2>
-        <p>
-          The manifests in this workspace do not declare any dependencies yet.
-          Use Add package to install the first one.
-        </p>
+    return (
+      <div className="table__wrapper table__wrapper--empty">
+        {selectionBar}
+        {filtering ? (
+          <div className="empty">
+            <h2>No dependencies match your filters</h2>
+            <p>Clear the text, scope, and status filters to see everything.</p>
+            <button
+              type="button"
+              className="empty__action secondary"
+              onClick={onClearFilters}
+            >
+              Clear filters
+            </button>
+          </div>
+        ) : (
+          <div className="empty">
+            <h2>No dependencies declared</h2>
+            <p>
+              The manifests in this workspace do not declare any dependencies
+              yet. Use Add package to install the first one.
+            </p>
+          </div>
+        )}
       </div>
     );
   }
@@ -418,62 +490,7 @@ export function DepTable({
         selectedDepKeys.size > 0 ? 'table__wrapper--bulk' : ''
       }`}
     >
-      {selectedDepKeys.size > 0 && (
-        <div
-          className="table__bulk-bar"
-          role="toolbar"
-          aria-label={`Actions for ${selectedDepKeys.size} selected package(s)`}
-        >
-          <span className="table__bulk-info">
-            Selected <strong>{selectedDepKeys.size}</strong> package(s)
-          </span>
-          <div className="table__bulk-actions">
-            {/*
-             * The labels are wrapped in the same span the row actions use, so
-             * the one rule that drops words for icons on a narrow panel covers
-             * both. `aria-label` carries the full wording, which is what makes
-             * losing the visible text survivable.
-             */}
-            {onBulkUpdateSelected && (
-              <button
-                type="button"
-                className="btn-update-primary"
-                aria-label="Update selected packages"
-                title="Update selected packages"
-                disabled={busy}
-                onClick={onBulkUpdateSelected}
-              >
-                <Icon name="arrow-up" />{' '}
-                <span className="row-action__label">Update Selected</span>
-              </button>
-            )}
-            {onBulkRemoveSelected && (
-              <button
-                type="button"
-                className="danger"
-                aria-label="Remove selected packages"
-                title="Remove selected packages"
-                disabled={busy}
-                onClick={onBulkRemoveSelected}
-              >
-                <Icon name="trash" />{' '}
-                <span className="row-action__label">Remove Selected</span>
-              </button>
-            )}
-            {/* Clearing a selection writes nothing, so a scan does not block it. */}
-            <button
-              type="button"
-              className="ghost"
-              aria-label="Clear selection"
-              title="Clear selection"
-              onClick={() => onToggleSelectAll?.([])}
-            >
-              <Icon name="close" />{' '}
-              <span className="row-action__label">Clear selection</span>
-            </button>
-          </div>
-        </div>
-      )}
+      {selectionBar}
 
       <div
         className="table__grid"
@@ -674,10 +691,7 @@ function renderStatusBadge(dep: Dependency) {
   const local = sourceLabel(dep);
   if (local) {
     return (
-      <span
-        className="badge badge--muted"
-        title="Not a registry package, so there is no registry version to compare against"
-      >
+      <span className="badge badge--muted" title={notUpdatableReason(dep)}>
         {local.toUpperCase()}
       </span>
     );
@@ -737,6 +751,8 @@ const DepRow = memo(function DepRow({
 }) {
   const dep = meta ? { ...scanned, meta } : scanned;
   const upgradeable = hasUpdate(dep);
+  const targetContext =
+    dep.cargoTarget !== undefined ? ` for ${dep.cargoTarget}` : '';
 
   return (
     <div
@@ -789,7 +805,11 @@ const DepRow = memo(function DepRow({
         }
       }}
     >
-      <div className="cell cell--name" role="gridcell" title={dep.name}>
+      <div
+        className="cell cell--name"
+        role="gridcell"
+        title={`${dep.name}${targetContext}`}
+      >
         <input
           type="checkbox"
           className="row-checkbox"
@@ -797,7 +817,7 @@ const DepRow = memo(function DepRow({
           // Named after what it selects. Unlabelled, a screen reader announced
           // every row's box identically, with nothing to tell 156 of them
           // apart.
-          aria-label={`Select ${dep.name}`}
+          aria-label={`Select ${dep.name}${targetContext}`}
           // Reached with Left/Right from the row, not with Tab — see the
           // roving tabindex note at the top of this file.
           tabIndex={-1}
@@ -823,6 +843,12 @@ const DepRow = memo(function DepRow({
         <span data-package-name className="package-name-highlight">
           {dep.name}
         </span>
+        {dep.cargoTarget !== undefined && (
+          <span className="muted" title={`Target: ${dep.cargoTarget}`}>
+            {' '}
+            {dep.cargoTarget}
+          </span>
+        )}
       </div>
 
       <div className="cell cell--scope" role="gridcell">
@@ -894,7 +920,7 @@ const DepRow = memo(function DepRow({
           <button
             type="button"
             className="btn-update-primary"
-            aria-label={`Update ${dep.name} to ${dep.latest}`}
+            aria-label={`Update ${dep.name}${targetContext} to ${dep.latest}`}
             title={`Update to ${dep.latest}`}
             tabIndex={-1}
             disabled={busy}
@@ -918,7 +944,7 @@ const DepRow = memo(function DepRow({
         <button
           type="button"
           className="ghost danger row-action--remove"
-          aria-label={`Remove ${dep.name} from this project`}
+          aria-label={`Remove ${dep.name}${targetContext} from this project`}
           title={`Remove ${dep.name} from this project`}
           tabIndex={-1}
           disabled={busy}

@@ -2,8 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const host = vi.hoisted(() => {
   const closed = new Set<(terminal: unknown) => void>();
+  const started = new Set<
+    (event: { terminal: unknown; execution: unknown }) => void
+  >();
   const ended = new Set<
-    (event: { execution: unknown; exitCode?: number }) => void
+    (event: {
+      terminal?: unknown;
+      execution: unknown;
+      exitCode?: number;
+    }) => void
   >();
   const integrated = new Set<
     (event: { terminal: unknown; shellIntegration: unknown }) => void
@@ -17,8 +24,12 @@ const host = vi.hoisted(() => {
     save: vi.fn(async () => true),
   };
   const terminal = {
+    state: { shell: 'bash' },
     shellIntegration: undefined as
-      | { executeCommand: ReturnType<typeof vi.fn> }
+      | {
+          executeCommand: ReturnType<typeof vi.fn>;
+          cwd?: { scheme: string; fsPath: string };
+        }
       | undefined,
     show: vi.fn(),
     sendText: vi.fn(),
@@ -41,12 +52,22 @@ const host = vi.hoisted(() => {
   };
   const window = {
     createTerminal: vi.fn(() => terminal),
+    onDidStartTerminalShellExecution: (
+      fn: (event: { terminal: unknown; execution: unknown }) => void,
+    ) => {
+      started.add(fn);
+      return { dispose: () => started.delete(fn) };
+    },
     onDidCloseTerminal: (fn: (terminal: unknown) => void) => {
       closed.add(fn);
       return { dispose: () => closed.delete(fn) };
     },
     onDidEndTerminalShellExecution: (
-      fn: (event: { execution: unknown; exitCode?: number }) => void,
+      fn: (event: {
+        terminal?: unknown;
+        execution: unknown;
+        exitCode?: number;
+      }) => void,
     ) => {
       ended.add(fn);
       return { dispose: () => ended.delete(fn) };
@@ -58,7 +79,16 @@ const host = vi.hoisted(() => {
       return { dispose: () => integrated.delete(fn) };
     },
   };
-  return { workspace, window, document, terminal, closed, ended, integrated };
+  return {
+    workspace,
+    window,
+    document,
+    terminal,
+    closed,
+    ended,
+    integrated,
+    started,
+  };
 });
 
 vi.mock('vscode', () => ({
@@ -78,6 +108,7 @@ vi.mock('vscode', () => ({
 
 import { Scanner } from '../../src/core/scanner.js';
 import type { Dependency, ProjectGroup } from '../../src/core/types.js';
+import { NodeProvider } from '../../src/providers/node/index.js';
 import { PythonProvider } from '../../src/providers/python/index.js';
 import { DependencyMutator } from '../../src/ui/dependencyMutator.js';
 import { PanelInspections } from '../../src/ui/panel/inspections.js';
@@ -116,6 +147,8 @@ beforeEach(() => {
   host.document.version = 1;
   host.document.isDirty = false;
   host.terminal.shellIntegration = undefined;
+  host.terminal.state.shell = 'bash';
+  host.window.createTerminal.mockImplementation(() => host.terminal);
 });
 afterEach(() => vi.useRealTimers());
 
@@ -144,10 +177,173 @@ describe('managed command lifecycle', () => {
       runner.dispose();
     }
   });
-  it('returns the actual command failure', async () => {
+  it('quotes marker strings literally instead of using VS Code weak argv escaping', async () => {
+    const execution = {};
+    const executeCommand = vi.fn(() => execution);
+    host.terminal.shellIntegration = {
+      executeCommand,
+      cwd: { scheme: 'file', fsPath: '/p' },
+    };
+    const runner = new TerminalRunner();
+    try {
+      const result = runner.run({
+        argv: ['uv', 'add', 'pkg>=2; python_version < "3.12"'],
+        cwd: '/p',
+        description: 'test',
+      });
+      await vi.waitFor(() => expect(executeCommand).toHaveBeenCalled());
+      expect(executeCommand).toHaveBeenCalledWith(
+        `uv add 'pkg>=2; python_version < "3.12"'`,
+      );
+      for (const listener of host.ended) listener({ execution, exitCode: 0 });
+      expect(await result).toEqual({ exitCode: 0 });
+    } finally {
+      runner.dispose();
+    }
+  });
+  it('blocks managed execution while a user command is active', async () => {
+    const execution = {};
+    const executeCommand = vi.fn(() => execution);
+    host.terminal.shellIntegration = {
+      executeCommand,
+      cwd: { scheme: 'file', fsPath: '/p' },
+    };
+    const runner = new TerminalRunner();
+    try {
+      const first = runner.run({
+        argv: ['echo'],
+        cwd: '/p',
+        description: 'first',
+      });
+      await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledTimes(1));
+      for (const listener of host.ended)
+        listener({ terminal: host.terminal, execution, exitCode: 0 });
+      await first;
+      const manual = {};
+      for (const listener of host.started)
+        listener({ terminal: host.terminal, execution: manual });
+      await expect(
+        runner.run({ argv: ['echo'], cwd: '/other', description: 'blocked' }),
+      ).rejects.toThrow('Another command');
+      expect(executeCommand).toHaveBeenCalledTimes(1);
+      expect(host.terminal.dispose).not.toHaveBeenCalled();
+      for (const listener of host.ended)
+        listener({ terminal: host.terminal, execution: manual, exitCode: 0 });
+      const next = runner.run({
+        argv: ['echo'],
+        cwd: '/p',
+        description: 'next',
+      });
+      await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledTimes(2));
+      for (const listener of host.ended)
+        listener({ terminal: host.terminal, execution, exitCode: 0 });
+      expect(await next).toEqual({ exitCode: 0 });
+    } finally {
+      runner.dispose();
+    }
+  });
+  it('recreates an idle terminal after the user changes its directory', async () => {
+    const execution = {};
+    const executeCommand = vi.fn(() => execution);
+    host.terminal.shellIntegration = {
+      executeCommand,
+      cwd: { scheme: 'file', fsPath: '/p' },
+    };
+    const runner = new TerminalRunner();
+    try {
+      const first = runner.run({
+        argv: ['echo'],
+        cwd: '/p',
+        description: 'first',
+      });
+      await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledTimes(1));
+      for (const listener of host.ended) listener({ execution, exitCode: 0 });
+      await first;
+      host.terminal.shellIntegration.cwd = { scheme: 'file', fsPath: '/other' };
+      host.window.createTerminal.mockImplementationOnce(() => {
+        host.terminal.shellIntegration = {
+          executeCommand,
+          cwd: { scheme: 'file', fsPath: '/p' },
+        };
+        return host.terminal;
+      });
+      const next = runner.run({
+        argv: ['echo'],
+        cwd: '/p',
+        description: 'next',
+      });
+      await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledTimes(2));
+      expect(host.terminal.dispose).toHaveBeenCalledTimes(1);
+      for (const listener of host.ended) listener({ execution, exitCode: 0 });
+      expect(await next).toEqual({ exitCode: 0 });
+    } finally {
+      runner.dispose();
+    }
+  });
+  it('waits for directory metadata that arrives after integration attaches', async () => {
+    vi.useFakeTimers();
     const execution = {};
     const executeCommand = vi.fn(() => execution);
     host.terminal.shellIntegration = { executeCommand };
+    const runner = new TerminalRunner();
+    try {
+      const result = runner.run({
+        argv: ['echo'],
+        cwd: '/p',
+        description: 'test',
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(executeCommand).not.toHaveBeenCalled();
+      host.terminal.shellIntegration.cwd = { scheme: 'file', fsPath: '/p' };
+      await vi.advanceTimersByTimeAsync(50);
+      expect(executeCommand).toHaveBeenCalledTimes(1);
+      for (const listener of host.ended) listener({ execution, exitCode: 0 });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toEqual({ exitCode: 0 });
+    } finally {
+      runner.dispose();
+    }
+  });
+  it('refuses a terminal whose directory cannot be verified', async () => {
+    vi.useFakeTimers();
+    const executeCommand = vi.fn();
+    host.terminal.shellIntegration = { executeCommand };
+    const runner = new TerminalRunner();
+    try {
+      const result = expect(
+        runner.run({ argv: ['echo'], cwd: '/p', description: 'test' }),
+      ).rejects.toThrow('working directory');
+      await vi.advanceTimersByTimeAsync(6001);
+      await result;
+      expect(executeCommand).not.toHaveBeenCalled();
+    } finally {
+      runner.dispose();
+    }
+  });
+  it('refuses a shell whose quoting rules are not supported', async () => {
+    const executeCommand = vi.fn();
+    host.terminal.state.shell = 'python';
+    host.terminal.shellIntegration = {
+      executeCommand,
+      cwd: { scheme: 'file', fsPath: '/p' },
+    };
+    const runner = new TerminalRunner();
+    try {
+      await expect(
+        runner.run({ argv: ['echo'], cwd: '/p', description: 'test' }),
+      ).rejects.toThrow('terminal shell');
+      expect(executeCommand).not.toHaveBeenCalled();
+    } finally {
+      runner.dispose();
+    }
+  });
+  it('returns the actual command failure', async () => {
+    const execution = {};
+    const executeCommand = vi.fn(() => execution);
+    host.terminal.shellIntegration = {
+      executeCommand,
+      cwd: { scheme: 'file', fsPath: '/p' },
+    };
     const runner = new TerminalRunner();
     try {
       const result = runner.run({
@@ -158,14 +354,17 @@ describe('managed command lifecycle', () => {
       await vi.waitFor(() => expect(executeCommand).toHaveBeenCalled());
       for (const listener of host.ended) listener({ execution, exitCode: 7 });
       expect(await result).toEqual({ exitCode: 7 });
-      expect(host.ended.size).toBe(0);
+      expect(host.ended.size).toBe(1);
     } finally {
       runner.dispose();
     }
   });
   it('settles immediately when an executing terminal closes', async () => {
     const executeCommand = vi.fn(() => ({}));
-    host.terminal.shellIntegration = { executeCommand };
+    host.terminal.shellIntegration = {
+      executeCommand,
+      cwd: { scheme: 'file', fsPath: '/p' },
+    };
     const runner = new TerminalRunner();
     try {
       const result = runner.run({
@@ -176,14 +375,17 @@ describe('managed command lifecycle', () => {
       await vi.waitFor(() => expect(executeCommand).toHaveBeenCalled());
       for (const listener of host.closed) listener(host.terminal);
       expect(await result).toEqual({ exitCode: undefined });
-      expect(host.ended.size).toBe(0);
+      expect(host.ended.size).toBe(1);
     } finally {
       runner.dispose();
     }
   });
   it('treats a missing execution-end event as unverified and blocks follow-up work', async () => {
     vi.useFakeTimers();
-    host.terminal.shellIntegration = { executeCommand: vi.fn(() => ({})) };
+    host.terminal.shellIntegration = {
+      executeCommand: vi.fn(() => ({})),
+      cwd: { scheme: 'file', fsPath: '/p' },
+    };
     const runner = new TerminalRunner(20);
     try {
       const result = runner.run({
@@ -193,7 +395,7 @@ describe('managed command lifecycle', () => {
       });
       await vi.advanceTimersByTimeAsync(30);
       expect(await result).toEqual({ exitCode: undefined });
-      expect(host.ended.size).toBe(0);
+      expect(host.ended.size).toBe(1);
       await expect(
         runner.run({ argv: ['echo'], cwd: '/p', description: 'test' }),
       ).rejects.toThrow('previous command');
@@ -235,6 +437,70 @@ describe('mutation safety', () => {
       failed,
     };
   }
+  it('blocks unsaved CLI manifests without saving or dispatching a command', async () => {
+    host.document.isDirty = true;
+    const { value, terminal } = mutator(0);
+    await expect(
+      value.install(new NodeProvider(), '/p/package.json', 'pkg', '2', 'prod'),
+    ).rejects.toThrow('Save the manifest');
+    expect(host.document.save).not.toHaveBeenCalled();
+    expect(terminal.run).not.toHaveBeenCalled();
+  });
+  it('refuses stale CLI dependency snapshots', async () => {
+    const provider = new NodeProvider();
+    const ctx = makeContext();
+    const parsed = await provider.parse(
+      '/p/package.json',
+      '{"dependencies":{"pkg":"^1.0.0"}}',
+      ctx,
+    );
+    host.document.text = '{"dependencies":{"pkg":"^2.0.0"}}';
+    const { value, terminal } = mutator(0);
+    await expect(
+      value.update(parsed.dependencies[0], provider, '3.0.0'),
+    ).rejects.toThrow('changed since the last scan');
+    expect(terminal.run).not.toHaveBeenCalled();
+  });
+  it('revalidates at terminal dispatch after startup waits', async () => {
+    host.document.text = '{"dependencies":{}}';
+    const { value, terminal } = mutator(0);
+    terminal.run.mockImplementationOnce(async (...args: unknown[]) => {
+      host.document.isDirty = true;
+      await (args[1] as () => Promise<void>)();
+      return { exitCode: 0 };
+    });
+    await expect(
+      value.install(new NodeProvider(), '/p/package.json', 'pkg', '2', 'prod'),
+    ).rejects.toThrow('Save the manifest');
+    expect(host.workspace.applyEdit).not.toHaveBeenCalled();
+  });
+  it('validates bulk manifests rather than bypassing dirty checks', async () => {
+    host.document.isDirty = true;
+    const { value, terminal } = mutator(0);
+    await expect(
+      value.runBulkUpdate(
+        { argv: ['npm', 'update'], cwd: '/p', description: 'test' },
+        '/p/package.json',
+      ),
+    ).rejects.toThrow('Save the manifest');
+    expect(terminal.run).not.toHaveBeenCalled();
+  });
+  it('refuses ambiguous Python removals before manifest fallback', async () => {
+    const { value, terminal } = mutator(0);
+    host.document.text =
+      'pkg==1; python_version < "3.12"\npkg==2; python_version >= "3.12"\n';
+    const provider = new PythonProvider();
+    const parsed = await provider.parse(
+      '/p/requirements.txt',
+      host.document.text,
+      makeContext(),
+    );
+    expect(await value.uninstall(parsed.dependencies[0], provider)).toBe(
+      'unsupported',
+    );
+    expect(terminal.run).not.toHaveBeenCalled();
+    expect(host.workspace.applyEdit).not.toHaveBeenCalled();
+  });
   it('blocks untrusted mutations before detecting or executing a tool', async () => {
     host.workspace.isTrusted = false;
     const { value, terminal } = mutator(0);

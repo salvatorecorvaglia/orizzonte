@@ -12,7 +12,7 @@
 
 ## Features ✨
 
-- 🌐 **Universal Multi-Ecosystem Support**: Native parsing for `package.json`, `pyproject.toml`, `requirements.txt`, `Cargo.toml`, `go.mod`, `composer.json`, `pom.xml`, `build.gradle`, and `build.gradle.kts`.
+- 🌐 **Universal Multi-Ecosystem Support**: Native parsing, including Cargo target-specific dependency tables, for `package.json`, `pyproject.toml`, `requirements.txt`, `Cargo.toml`, `go.mod`, `composer.json`, `pom.xml`, `build.gradle`, and `build.gradle.kts`.
 - ⚡ **Panel-First Interface**:
   - **React Webview Panel** (`orizzonte.open`): Interactive, virtualized UI built with React, Vite, and TanStack Virtual for deep dependency analysis, search, sorting, and filtering. This is where dependencies are read and acted on.
   - **Activity Bar View** (`orizzonte.sidebar`): A native launcher for the panel — Open and Search buttons plus project links, drawn and themed by VS Code itself. Its title bar carries the toolbar actions — open, search, check updates, refresh and update all — so they are one click away without the panel being open.
@@ -27,7 +27,7 @@
 - 📤 **Export Dependency Report**: Write the current scan — outdated packages, known vulnerabilities, and duplicate versions — to a Markdown or JSON file for sharing outside the editor.
 - 📏 **Package Size Tracking**: Tracks unpacked size or download size for packages across Node (npm), Rust (Cargo), and Python (PyPI) registries.
 - 🔍 **Registry Search & Package Installation**: Search public registries (npm, PyPI, Crates.io, Packagist, Maven Central) and install packages into your manifests without leaving VS Code.
-- 🌲 **"Why Is This Installed?" Dependency Inspector**: Inspect transitive dependencies and trace exact resolution paths.
+- 🌲 **"Why Is This Installed?" Dependency Inspector**: Inspect dependency paths with resolved versions and separate resolution identities. Ambiguous or incomplete lockfile paths are marked as partial; registry fallback trees are labelled as package dependencies.
 - 📁 **Monorepo & Multi-Root Support**: Automatically discovers and aggregates nested manifest files across complex monorepos and multi-root workspaces with `.gitignore` and glob exclusion awareness.
 - ♿ **Accessible & Keyboard-First UI**: The whole dependency grid is a single tab stop — Up/Down moves between rows, Left/Right reaches a row's own checkbox and actions — with semantic button controls, a global `Ctrl+F` / `Cmd+F` search shortcut, dismissable overlays (`Escape` key & backdrop dismissal for drawers, menus and modals), ARIA live progress indicators, `prefers-reduced-motion` support, and focus rings and row states that survive high-contrast and forced-colours themes.
 - 🚀 **High Performance & Shared Caching**: Built-in HTTP caching layer across registry queries, concurrent background manifest scanning, and reference-counted operation tracking (`BusyTracker`) for smooth progress indication across async tasks.

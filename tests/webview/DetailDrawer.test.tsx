@@ -54,6 +54,41 @@ describe('lazy loading', () => {
 });
 
 describe('versions', () => {
+  it('explains the registry identity and evidence for an aliased version', () => {
+    renderDrawer({
+      dep: dep({
+        registryName: 'real-package',
+        source: 'alias',
+        versionResolution: {
+          version: '18.0.0',
+          source: 'lockfile-importer',
+          confidence: 'exact',
+        },
+      }),
+    });
+    expect(screen.getByText('real-package')).toBeInTheDocument();
+    expect(
+      screen.getByText('Lockfile entry for this workspace member'),
+    ).toBeInTheDocument();
+  });
+
+  it('explains an inferred version without claiming it was verified', () => {
+    renderDrawer({
+      dep: dep({
+        versionResolution: {
+          version: '18.0.0',
+          source: 'lockfile-range',
+          confidence: 'inferred',
+        },
+      }),
+    });
+    expect(
+      screen.getByText('Inferred from matching lockfile versions'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/unverified; excluded from vulnerability checks/),
+    ).toBeInTheDocument();
+  });
   it('shows wanted only when it differs from what is installed', () => {
     const { rerender } = renderDrawer({
       dep: dep({ installed: '18.0.0', wanted: '18.0.0', latest: '19.0.0' }),
@@ -134,18 +169,36 @@ describe('advisories', () => {
     expect(screen.getByText('CVE-2020-1')).toBeInTheDocument();
   });
 
-  it('says so when the match was against an inferred version', () => {
-    // Advisories are matched on `installed`; when that was guessed from the
-    // constraint it may name a version nobody actually has.
+  it('labels an inferred version as excluded from vulnerability checks', () => {
+    // The warning also covers legacy rows carrying the approximation flag.
     renderDrawer({
       dep: { ...vulnerable, installedIsApproximate: true },
     });
-    expect(screen.getByText(/No lockfile pins a version/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/unverified; excluded from vulnerability checks/i),
+    ).toBeInTheDocument();
+  });
+
+  it('explains an inferred resolution even when no advisories were returned', () => {
+    renderDrawer({
+      dep: dep({
+        versionResolution: {
+          version: '18.0.0',
+          source: 'lockfile-range',
+          confidence: 'inferred',
+        },
+      }),
+    });
+    expect(
+      screen.getByText(/unverified; excluded from vulnerability checks/i),
+    ).toBeInTheDocument();
   });
 
   it('states the match plainly when a lockfile pinned the version', () => {
     renderDrawer({ dep: vulnerable });
-    expect(screen.queryByText(/No lockfile pins a version/i)).toBeNull();
+    expect(
+      screen.queryByText(/unverified; excluded from vulnerability checks/i),
+    ).toBeNull();
   });
 
   it('distinguishes severities by more than one uppercase word', () => {
@@ -357,6 +410,16 @@ describe("what's changed", () => {
   });
 });
 
+describe('Cargo target context', () => {
+  it('shows which target owns a dependency declaration', () => {
+    renderDrawer({
+      dep: dep({ ecosystem: 'cargo', cargoTarget: 'cfg(windows)' }),
+    });
+    expect(screen.getByText('Target')).toBeInTheDocument();
+    expect(screen.getByText('cfg(windows)')).toBeInTheDocument();
+  });
+});
+
 describe('the why tree', () => {
   it('distinguishes resolving from having no answer', () => {
     const { rerender } = renderDrawer({ why: undefined });
@@ -401,8 +464,33 @@ describe('the why tree', () => {
     // deps.dev answers what the package pulls in, not why it is here — so the
     // label says the dependency is declared directly and names the tree for
     // what it is.
+    expect(
+      screen.getByRole('heading', { name: 'Package dependencies' }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Declared directly in/i)).toBeInTheDocument();
     expect(screen.getByText(/pulls in, from deps\.dev/i)).toBeInTheDocument();
+  });
+
+  it('labels incomplete lockfile explanations and preserves version instances', () => {
+    renderDrawer({
+      why: {
+        source: 'lockfile',
+        partial: true,
+        roots: [
+          { id: 'copy1', name: 'shared', version: '1.0.0', children: [] },
+          {
+            id: 'copy2',
+            name: 'shared',
+            version: '2.0.0',
+            truncated: true,
+            children: [],
+          },
+        ],
+      },
+    });
+    expect(screen.getByText(/Partial explanation/i)).toBeInTheDocument();
+    expect(screen.getByText('2.0.0')).toBeInTheDocument();
+    expect(screen.getByText('(partial)')).toBeInTheDocument();
   });
 
   it('renders nested chains', () => {

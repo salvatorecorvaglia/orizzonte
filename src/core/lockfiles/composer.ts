@@ -5,6 +5,7 @@
  * readers walk the same concatenation of them.
  */
 
+import { buildResolutionGraph, resolutionId } from './graph.js';
 import { addResolved, addVersion, type LockfileReader } from './types.js';
 
 interface ComposerEntry {
@@ -34,18 +35,17 @@ export const composerLockfile: LockfileReader = {
     const all = entries(text);
     if (!all) return undefined;
 
-    const graph = new Map<string, string[]>();
-    for (const entry of all) {
-      graph.set(
-        entry.name,
-        // `php` and `ext-*` are platform requirements, not packages anyone
-        // installed — showing them as dependencies answers a question nobody
-        // asked.
-        Object.keys(entry.require ?? {}).filter(
-          (name) => name !== 'php' && !name.startsWith('ext-'),
-        ),
-      );
-    }
+    const graph = buildResolutionGraph(
+      all.map((entry) => ({
+        id: resolutionId(entry.name, entry.version),
+        name: entry.name,
+        version: entry.version,
+        dependencies: Object.entries(entry.require ?? {})
+          .filter(([name]) => name !== 'php' && !name.startsWith('ext-'))
+          .map(([name, constraint]) => ({ name, constraint })),
+      })),
+      'composer',
+    );
     return graph;
   },
 

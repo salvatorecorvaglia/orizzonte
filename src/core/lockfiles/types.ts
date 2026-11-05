@@ -6,8 +6,17 @@
  * once here and every format module returns them.
  */
 
-/** name -> the names it directly requires. */
-export type ForwardGraph = Map<string, string[]>;
+/** A resolution instance; equal names/versions may still have different install paths or peers. */
+export interface GraphNode {
+  id: string;
+  name: string;
+  version?: string;
+  children: string[];
+  root?: boolean;
+  importer?: string;
+  truncated?: boolean;
+}
+export type ForwardGraph = Map<string, GraphNode>;
 
 /** name -> every version the lockfile resolves it at. */
 export type VersionMap = Map<string, Set<string>>;
@@ -80,17 +89,4 @@ export function addVersion(
   const set = map.get(name);
   if (set) set.add(version);
   else map.set(name, new Set([version]));
-}
-
-/** Unions `children` into `name`'s edges; a package can appear more than once. */
-export function addEdges(
-  graph: ForwardGraph,
-  name: string,
-  children: string[],
-): void {
-  const existing = graph.get(name);
-  graph.set(
-    name,
-    existing ? [...new Set([...existing, ...children])] : children,
-  );
 }

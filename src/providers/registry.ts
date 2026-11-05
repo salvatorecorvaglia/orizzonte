@@ -74,6 +74,10 @@ export function allWatchedFileNames(): string[] {
     'settings.gradle',
     'settings.gradle.kts',
     '.yarnrc.yml',
+    'pip.conf',
+    'pip.ini',
+    'uv.toml',
+    'settings.xml',
   ]);
   for (const provider of PROVIDERS) {
     for (const file of provider.manifestFiles) names.add(file);

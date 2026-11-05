@@ -12,6 +12,7 @@ import {
   isUpdatable,
   notUpdatableReason,
   scopeLabel,
+  sourceLabel,
 } from '../core/vocabulary.js';
 import { ECOSYSTEM_LABELS, formatBytes, formatDate } from './format.js';
 import { Icon } from './Icon.js';
@@ -20,7 +21,9 @@ import { post } from './vscodeApi.js';
 
 interface Props {
   dep: Dependency;
-  why: { roots: DepNode[]; source: 'lockfile' | 'registry' } | undefined;
+  why:
+    | { roots: DepNode[]; source: 'lockfile' | 'registry'; partial?: boolean }
+    | undefined;
   /**
    * Undefined and `changelogLoaded: false` means "not answered yet";
    * undefined with `changelogLoaded: true` means the host looked and found
@@ -153,12 +156,64 @@ export function DetailDrawer({
           <dd>
             <code>{declaredLabel(dep)}</code>
           </dd>
+          {dep.cargoTarget !== undefined && (
+            <>
+              <dt>Target</dt>
+              <dd>
+                <code>{dep.cargoTarget}</code>
+              </dd>
+            </>
+          )}
           <dt>Scope</dt>
           <dd>{scopeLabel(dep, 'long')}</dd>
+          {sourceLabel(dep) && (
+            <>
+              <dt>Source</dt>
+              <dd>{sourceLabel(dep)}</dd>
+            </>
+          )}
+          {dep.registryName && dep.registryName !== dep.name && (
+            <>
+              <dt>Registry package</dt>
+              <dd>
+                <code>{dep.registryName}</code>
+              </dd>
+            </>
+          )}
           <dt>Installed</dt>
           <dd>
             <code>{currentVersion(dep)}</code>
+            {(dep.installedIsApproximate ||
+              (dep.versionResolution &&
+                dep.versionResolution.confidence !== 'exact')) && (
+              <span className="muted">
+                {' '}
+                — unverified; excluded from vulnerability checks
+              </span>
+            )}
           </dd>
+          {dep.versionResolution && (
+            <>
+              <dt>Version evidence</dt>
+              <dd>
+                {
+                  {
+                    'lockfile-importer':
+                      'Lockfile entry for this workspace member',
+                    'lockfile-descriptor':
+                      'Lockfile entry matching this declaration',
+                    'lockfile-single':
+                      'Single matching package in the lockfile',
+                    'lockfile-range':
+                      'Inferred from matching lockfile versions',
+                    declaration: 'Exact version declared in the manifest',
+                    constraint: 'Estimated from the declared version range',
+                    unresolved: 'No matching version could be resolved',
+                  }[dep.versionResolution.source]
+                }
+              </dd>
+            </>
+          )}
           {dep.wanted && dep.wanted !== dep.installed && (
             <>
               <dt title="Highest version allowed by the declared range">
@@ -331,20 +386,6 @@ export function DetailDrawer({
         <section>
           <h3>Security ({dep.vulnerabilities.length})</h3>
           {/*
-           * Advisories are matched against the resolved version. When no
-           * lockfile pinned one we compared against the constraint's lower
-           * bound, which may name a version nobody actually installed — so the
-           * result is worth reading, but not worth stating as fact.
-           */}
-          {dep.installedIsApproximate && (
-            <div className="callout callout--info">
-              No lockfile pins a version for this package, so these advisories
-              were matched against <code>{currentVersion(dep)}</code>, inferred
-              from <code>{dep.declared}</code>. Install the project to check
-              against what you actually have.
-            </div>
-          )}
-          {/*
            * Ordered worst-first by `core/audit`, so the advisory that decides
            * what you do about this package is the one you read first.
            */}
@@ -430,7 +471,11 @@ export function DetailDrawer({
       </section>
 
       <section ref={whyRef} tabIndex={-1}>
-        <h3>Why is this installed?</h3>
+        <h3>
+          {why?.source === 'registry'
+            ? 'Package dependencies'
+            : 'Why is this installed?'}
+        </h3>
         {why === undefined ? (
           <div className="muted">Resolving…</div>
         ) : why.roots.length === 0 ? (
@@ -449,8 +494,14 @@ export function DetailDrawer({
             <div className="muted drawer__why-source">
               {why.source === 'lockfile'
                 ? 'From this project’s lockfile.'
-                : `Declared directly in ${manifestFileName(dep.manifestPath)}. No lockfile was found to trace other paths, so this shows what ${dep.name} pulls in, from deps.dev.`}
+                : `Declared directly in ${manifestFileName(dep.manifestPath)}. No usable local path was found. This is a registry package-dependency graph showing what ${dep.name} pulls in, from deps.dev.`}
             </div>
+            {why.partial && (
+              <p className="muted">
+                Partial explanation: some resolutions or paths could not be
+                identified uniquely.
+              </p>
+            )}
             <div className="tree">
               <NodeList nodes={why.roots} depth={0} />
             </div>
@@ -480,13 +531,14 @@ function NodeList({ nodes, depth }: { nodes: DepNode[]; depth: number }) {
     <ul>
       {nodes.map((node) => (
         <li
-          key={`${node.name}-${node.version ?? ''}-${node.requestedRange ?? ''}`}
+          key={`${node.id ?? `${node.name}-${node.version ?? ''}`}-${node.requestedRange ?? ''}`}
         >
           {node.name}
           {node.version && <span className="muted"> {node.version}</span>}
           {node.requestedRange && (
             <span className="muted"> ({node.requestedRange})</span>
           )}
+          {node.truncated && <span className="muted"> (partial)</span>}
           {node.children.length > 0 && (
             <NodeList nodes={node.children} depth={depth + 1} />
           )}

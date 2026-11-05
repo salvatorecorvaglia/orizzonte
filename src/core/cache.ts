@@ -95,6 +95,33 @@ export class TtlCache {
     private readonly maxEntries: number = DEFAULT_MAX_ENTRIES,
   ) {}
 
+  /** Diagnostic snapshot. Serialization is deliberate and kept off cache hot paths. */
+  statistics(): {
+    memory: { entries: number; serializedBytes: number };
+    pending: { entries: number; serializedBytes: number };
+    persisted: { entries: number; serializedBytes: number };
+  } {
+    const measure = (entries: Iterable<readonly [string, unknown]>) => {
+      let count = 0;
+      let serializedBytes = 0;
+      for (const [key, value] of entries) {
+        count++;
+        serializedBytes +=
+          Buffer.byteLength(key, 'utf8') +
+          Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
+      }
+      return { entries: count, serializedBytes };
+    };
+    const persisted = (this.storage.keys?.() ?? [])
+      .filter((key) => key.startsWith(LEGACY_STORAGE_PREFIX))
+      .map((key) => [key, this.storage.get(key)] as const);
+    return {
+      memory: measure(this.memory),
+      pending: measure(this.pending),
+      persisted: measure(persisted),
+    };
+  }
+
   get<T>(key: string): T | undefined {
     const entry = this.read<T>(key);
     if (!entry) {

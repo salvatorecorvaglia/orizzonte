@@ -119,6 +119,20 @@ pnpm run test:integration
 
 ---
 
+## Performance measurements
+
+Run `pnpm run benchmark` to measure production version enrichment, npm and uv
+lockfile parsing, and retained cache data using synthetic fixtures without network
+access. The script verifies that memoized enrichment matches the original
+row-by-row calculation and reports three timing samples and their median.
+
+Cache statistics describe UTF-8 serialized data, not actual heap usage. Memory,
+pending writes, and persisted entries can overlap; their sizes must not be added
+as a heap estimate. The optional GC-assisted heap delta is approximate. Compare
+runs on the same Node version and machine before changing cache capacities or
+introducing workers. The fixtures are a repeatable baseline, not production
+latency guarantees.
+
 ## 📬 Submitting Pull Requests
 
 1. **Create a topic branch**:

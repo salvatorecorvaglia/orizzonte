@@ -10,6 +10,7 @@
 import type { ProviderContext } from '../providers/provider.js';
 import { providerFor } from '../providers/registry.js';
 import { cacheKey, TTL } from './cache.js';
+import { isConcreteVersion } from './concreteVersion.js';
 import { normalizeName as normalizePythonName } from './pep503.js';
 import type {
   Dependency,
@@ -126,7 +127,13 @@ export async function auditDependencies(
     group.dependencies.forEach((dep, index) => {
       // OSV matches on a concrete version; a range tells it nothing.
       const version = dep.installed;
-      if (!version || dep.installedIsApproximate) {
+      if (
+        !version ||
+        dep.installedIsApproximate ||
+        (dep.versionResolution &&
+          dep.versionResolution.confidence !== 'exact') ||
+        !isConcreteVersion(dep.ecosystem, version)
+      ) {
         skipped++;
         return;
       }

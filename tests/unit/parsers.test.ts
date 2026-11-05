@@ -465,13 +465,9 @@ cc = "1.0"
     expect(findDep(manifest.dependencies, 'criterion').scope).toBe('dev');
     expect(findDep(manifest.dependencies, 'cc').scope).toBe('build');
 
-    // Path and git dependencies have no registry version, so they are excluded.
-    expect(manifest.dependencies.some((dep) => dep.name === 'local')).toBe(
-      false,
-    );
-    expect(manifest.dependencies.some((dep) => dep.name === 'from-git')).toBe(
-      false,
-    );
+    // Local declarations remain visible but cannot be updated from a registry.
+    expect(findDep(manifest.dependencies, 'local').source).toBe('path');
+    expect(findDep(manifest.dependencies, 'from-git').source).toBe('git');
   });
 
   it('recognises a virtual workspace manifest', async () => {

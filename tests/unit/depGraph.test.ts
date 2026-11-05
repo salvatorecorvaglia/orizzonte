@@ -23,7 +23,7 @@ function dep(overrides: Partial<Dependency> = {}): Dependency {
     ecosystem: 'node',
     scope: 'prod',
     declared: '*',
-    installed: '4.3.0',
+    installed: undefined,
     updateKind: 'unknown',
     vulnerabilities: [],
     manifestPath: '/p/package.json',
@@ -475,7 +475,7 @@ describe('deps.dev registry fallback', () => {
     const ctx = contextReturning(denseDiamond(4, 8));
 
     const result = await explainDependency(
-      dep({ name: 'org.example:root', ecosystem: 'maven' }),
+      dep({ name: 'org.example:root', ecosystem: 'maven', installed: '1.0.0' }),
       ctx,
     );
 
@@ -525,7 +525,7 @@ describe('deps.dev registry fallback', () => {
     });
 
     const result = await explainDependency(
-      dep({ name: 'org.example:root', ecosystem: 'maven' }),
+      dep({ name: 'org.example:root', ecosystem: 'maven', installed: '1.0.0' }),
       ctx,
     );
 

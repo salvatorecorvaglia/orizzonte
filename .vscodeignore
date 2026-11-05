@@ -32,3 +32,6 @@ test-results/**
 .pnpm-store/**
 .agents/**
 .codex/**
+
+# Development benchmarks are not runtime extension resources.
+scripts/**

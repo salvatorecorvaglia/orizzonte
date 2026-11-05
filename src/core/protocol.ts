@@ -142,6 +142,7 @@ export type HostMessage =
       depKey: string;
       roots: DepNode[];
       source: 'lockfile' | 'registry';
+      partial?: boolean;
     }
   | {
       type: 'duplicateVersions';

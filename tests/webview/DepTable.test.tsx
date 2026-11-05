@@ -58,6 +58,64 @@ function group(dependencies: Dependency[]): ProjectGroup {
 
 const noop = () => {};
 
+describe('selection across filters', () => {
+  it('keeps hidden selections visible and removable when every row is filtered out', async () => {
+    const clear = vi.fn();
+    const remove = vi.fn();
+    renderTable([], undefined, {
+      filtering: true,
+      selectedDepKeys: new Set(['hidden']),
+      onToggleSelectAll: clear,
+      onBulkRemoveSelected: remove,
+    });
+    expect(screen.getByText(/1 hidden by filters/)).toBeInTheDocument();
+    expect(
+      screen.getByText('No dependencies match your filters'),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Remove selected packages' }),
+    );
+    expect(remove).toHaveBeenCalledOnce();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Clear selection' }),
+    );
+    expect(clear).toHaveBeenCalledWith([]);
+  });
+
+  it('counts only selections hidden by filters and blocks writes while busy', async () => {
+    const clear = vi.fn();
+    renderTable([group([dep({ key: 'visible' })])], undefined, {
+      filtering: true,
+      busy: true,
+      selectedDepKeys: new Set(['visible', 'hidden']),
+      onToggleSelectAll: clear,
+      onBulkRemoveSelected: noop,
+      onBulkUpdateSelected: noop,
+    });
+    expect(screen.getByText(/1 hidden by filters/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Remove selected packages' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Update selected packages' }),
+    ).toBeDisabled();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Clear selection' }),
+    );
+    expect(clear).toHaveBeenCalledWith([]);
+  });
+
+  it('explains privacy protection on private source badges', () => {
+    renderTable([group([dep({ source: 'private' })])]);
+    expect(screen.getByText('PRIVATE')).toHaveAttribute(
+      'title',
+      expect.stringContaining(
+        'Public lookups and vulnerability queries are skipped',
+      ),
+    );
+  });
+});
+
 function renderTable(
   groups: ProjectGroup[],
   sort: SortState = { key: 'name', direction: 'asc' },
@@ -991,4 +1049,33 @@ it('offers a release transition as an update instead of reporting it current', (
   ]);
   expect(screen.getByText('RELEASE')).toBeVisible();
   expect(screen.getByRole('button', { name: /Update preview/ })).toBeEnabled();
+});
+
+describe('Cargo target declaration context', () => {
+  it('distinguishes same-name target rows for display and keyboard actions', () => {
+    renderTable([
+      group([
+        dep({
+          key: 'windows',
+          name: 'serde',
+          ecosystem: 'cargo',
+          cargoTarget: 'cfg(windows)',
+        }),
+        dep({
+          key: 'unix',
+          name: 'serde',
+          ecosystem: 'cargo',
+          cargoTarget: 'cfg(unix)',
+        }),
+      ]),
+    ]);
+    expect(
+      screen.getByRole('checkbox', { name: 'Select serde for cfg(windows)' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('checkbox', { name: 'Select serde for cfg(unix)' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('cfg(windows)')).toBeInTheDocument();
+    expect(screen.getByText('cfg(unix)')).toBeInTheDocument();
+  });
 });

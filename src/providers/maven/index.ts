@@ -9,6 +9,8 @@
 
 import * as path from 'node:path';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
+import { isConcreteVersion } from '../../core/concreteVersion.js';
+import { protectUncertainSources } from '../../core/sourcePrivacy.js';
 import type {
   Dependency,
   DepScope,
@@ -155,7 +157,10 @@ export class MavenProvider implements EcosystemProvider {
         // A `${...}` left over is a property this file does not define — a
         // parent POM's, usually. It is not a version, and handing it to OSV
         // as one asks about a release that does not exist.
-        installed: declared && !declared.includes('${') ? declared : undefined,
+        installed:
+          declared && isConcreteVersion('maven', declared)
+            ? declared
+            : undefined,
         updateKind: 'unknown',
         vulnerabilities: [],
         manifestPath: absolutePath,
@@ -167,14 +172,18 @@ export class MavenProvider implements EcosystemProvider {
       (module): module is string => typeof module === 'string',
     );
 
-    return {
-      ecosystem: 'maven',
-      path: absolutePath,
-      name: projectLabel,
-      dependencies,
-      workspaceMembers: modules,
-      isWorkspaceRoot: modules.length > 0 && dependencies.length === 0,
-    };
+    return protectUncertainSources(
+      {
+        ecosystem: 'maven',
+        path: absolutePath,
+        name: projectLabel,
+        dependencies,
+        workspaceMembers: modules,
+        isWorkspaceRoot: modules.length > 0 && dependencies.length === 0,
+      },
+      text,
+      _ctx,
+    );
   }
 
   async detectToolchain(

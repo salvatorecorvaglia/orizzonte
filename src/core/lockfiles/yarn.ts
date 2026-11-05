@@ -13,11 +13,11 @@
  */
 
 import {
-  addEdges,
-  addResolved,
-  addVersion,
-  type LockfileReader,
-} from './types.js';
+  buildResolutionGraph,
+  type GraphRecord,
+  resolutionId,
+} from './graph.js';
+import { addResolved, addVersion, type LockfileReader } from './types.js';
 
 /** Berry's schema-version header, which parses as a block but is not one. */
 const METADATA_BLOCK = '__metadata';
@@ -27,7 +27,10 @@ const VERSION_LINE = /^\s*version:?\s+"?([^"\s]+)"?\s*$/m;
 
 /** `lodash@^4.17.0` and `@scope/pkg@npm:^1.0.0` both reduce to the bare name. */
 export function yarnNameFromSpec(spec: string): string | undefined {
-  const at = spec.lastIndexOf('@');
+  const at = spec.indexOf(
+    '@',
+    spec.startsWith('@') ? spec.indexOf('/') + 1 : 0,
+  );
   if (at <= 0) return spec || undefined;
   return spec.slice(0, at) || undefined;
 }
@@ -73,31 +76,56 @@ export const yarnLockfile: LockfileReader = {
   file: 'yarn.lock',
 
   edges(text) {
-    const graph = new Map<string, string[]>();
-
-    for (const block of blocks(text)) {
-      const children: string[] = [];
+    const entries = [...blocks(text)];
+    const ids = entries.map((block) =>
+      resolutionId(
+        block.name,
+        VERSION_LINE.exec(block.text)?.[1],
+        block.specs.join(','),
+      ),
+    );
+    const descriptors = new Map<string, string>();
+    for (const [index, block] of entries.entries()) {
+      for (const spec of block.specs) {
+        descriptors.set(spec, ids[index]);
+        descriptors.set(spec.replace(/@npm:/, '@'), ids[index]);
+      }
+    }
+    const records: GraphRecord[] = entries.map((block, index) => {
+      const dependencies = [];
       let inDependencies = false;
-
       for (const line of block.body) {
-        const trimmed = line.trim().replace(/^['"]|['"]$/g, '');
+        const trimmed = line.trim();
         if (/^(dependencies|optionalDependencies):$/.test(trimmed)) {
           inDependencies = true;
           continue;
         }
-        // A non-indented-enough key ends the block.
-        if (inDependencies && line.search(/\S/) <= 2) {
-          inDependencies = false;
-        }
-        if (inDependencies) {
-          const child = trimmed.split(/[:\s]/)[0].replace(/^['"]|['"]$/g, '');
-          if (child) children.push(child);
-        }
+        if (inDependencies && line.search(/\S/) <= 2) inDependencies = false;
+        if (!inDependencies) continue;
+        const match =
+          /^(?:"([^"]+)"|'([^']+)'|([^\s:]+))(?::)?\s+(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(
+            trimmed,
+          );
+        if (!match) continue;
+        const name = match[1] ?? match[2] ?? match[3];
+        const range = match[4] ?? match[5] ?? match[6];
+        dependencies.push({
+          name,
+          id:
+            descriptors.get(`${name}@${range}`) ??
+            descriptors.get(`${name}@${range.replace(/^npm:/, '')}`) ??
+            `missing:yarn:${name}@${range}`,
+        });
       }
-
-      addEdges(graph, block.name, children);
-    }
-
+      return {
+        id: ids[index],
+        name:
+          /@npm:((?:@[^/]+\/)?[^@]+)@/.exec(block.specs[0])?.[1] ?? block.name,
+        version: VERSION_LINE.exec(block.text)?.[1],
+        dependencies,
+      };
+    });
+    const graph = buildResolutionGraph(records, 'node');
     return graph.size > 0 ? graph : undefined;
   },
 

@@ -1565,7 +1565,16 @@ a:hover,
 .table__bulk-info {
   font-size: var(--orizzonte-text-sm);
   color: var(--vscode-foreground);
-  white-space: nowrap;
+  text-align: center;
+}
+
+/* Keep selection controls reachable when filters hide every row. */
+.table__wrapper--empty .table__bulk-bar {
+  position: static;
+  transform: none;
+  align-self: center;
+  margin: var(--orizzonte-space-4);
+  flex-shrink: 0;
 }
 
 .table__bulk-actions {
