@@ -11,7 +11,9 @@
  */
 
 import * as assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { TerminalRunner } from '../../src/ui/terminalRunner.js';
 
@@ -21,6 +23,7 @@ function orizzonteTerminals(): readonly vscode.Terminal[] {
 
 describe('TerminalRunner', () => {
   let runner: TerminalRunner;
+  let tmpDir: string | undefined;
 
   beforeEach(() => {
     // Native shell integration may not report an end event on a headless
@@ -28,8 +31,12 @@ describe('TerminalRunner', () => {
     runner = new TerminalRunner(10_000);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     runner.dispose();
+    if (tmpDir) {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+      tmpDir = undefined;
+    }
   });
 
   it('runs a command and reports some exit code (or an honest "unknown")', async () => {
@@ -89,6 +96,11 @@ describe('TerminalRunner', () => {
   });
 
   it('opens a terminal for a new cwd, closing the old one only if its command is known to have finished', async () => {
+    // The shell reports canonical paths: resolve Windows short-name aliases
+    // (and macOS temporary-directory symlinks) before comparing directories.
+    tmpDir = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), 'orizzonte-terminal-')),
+    );
     const firstRun = await runner.run({
       argv: ['echo', 'first'],
       cwd: process.cwd(),
@@ -99,7 +111,7 @@ describe('TerminalRunner', () => {
       await assert.rejects(
         runner.run({
           argv: ['echo', 'second'],
-          cwd: os.tmpdir(),
+          cwd: tmpDir,
           description: 'second',
         }),
         /previous command/,
@@ -110,7 +122,7 @@ describe('TerminalRunner', () => {
 
     await runner.run({
       argv: ['echo', 'second'],
-      cwd: os.tmpdir(),
+      cwd: tmpDir,
       description: 'test echo',
     });
 
@@ -120,21 +132,11 @@ describe('TerminalRunner', () => {
       'a cwd change should have opened a new terminal',
     );
 
-    if (firstRun.exitCode === undefined) {
-      // No shell integration, so nothing says the first command finished.
-      // Disposing its terminal here is what used to kill an install still in
-      // progress when a bulk action moved on to the next project.
-      assert.ok(
-        terminals.includes(first),
-        'a terminal whose command may still be running must not be closed',
-      );
-    } else {
-      assert.equal(
-        terminals.length,
-        1,
-        'a terminal known to be idle should not linger alongside the new one',
-      );
-    }
+    assert.equal(
+      terminals.length,
+      1,
+      'a terminal known to be idle should not linger alongside the new one',
+    );
   });
 
   it('dispose() does not throw and cleans up its own listeners', async () => {

@@ -83,13 +83,14 @@ describe('custom repository privacy', () => {
     expect(canLookupDependency(parsed.dependencies[0], ctx)).toBe(true);
   });
   it('shares configuration reads within a scan and refreshes them next scan', async () => {
+    const configurationPath = path.join('/ws', 'uv.toml');
     const ctx = makeContext({}, '/ws');
     ctx.lockfileMemo = new Map();
     let configuration = '';
     const read = vi
       .spyOn(ctx, 'readFile')
       .mockImplementation(async (file) =>
-        file === '/ws/uv.toml' ? configuration : null,
+        file === configurationPath ? configuration : null,
       );
     const provider = new PythonProvider();
     await Promise.all(
@@ -102,7 +103,7 @@ describe('custom repository privacy', () => {
       ),
     );
     expect(
-      read.mock.calls.filter(([file]) => file === '/ws/uv.toml'),
+      read.mock.calls.filter(([file]) => file === configurationPath),
     ).toHaveLength(1);
     configuration = 'default-index="https://private.example/simple"';
     ctx.lockfileMemo = new Map();
@@ -113,7 +114,7 @@ describe('custom repository privacy', () => {
     );
     expect(parsed.dependencies[0].source).toBe('private');
     expect(
-      read.mock.calls.filter(([file]) => file === '/ws/uv.toml'),
+      read.mock.calls.filter(([file]) => file === configurationPath),
     ).toHaveLength(2);
   });
   it.each([
