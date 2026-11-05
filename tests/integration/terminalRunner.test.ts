@@ -34,7 +34,15 @@ describe('TerminalRunner', () => {
   afterEach(async () => {
     runner.dispose();
     if (tmpDir) {
-      await fs.rm(tmpDir, { recursive: true, force: true });
+      // Terminal disposal returns before the shell process exits. Windows
+      // keeps its cwd locked until then; retry transient EBUSY/EPERM errors
+      // without hiding a persistent cleanup failure (or exceeding the 30s hook).
+      await fs.rm(tmpDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 20,
+        retryDelay: 100,
+      });
       tmpDir = undefined;
     }
   });
