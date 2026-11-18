@@ -57,7 +57,7 @@ jobs:
         run: pnpm run package
 
       - name: Upload VSIX
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           compression-level: 0
           name: orizzonte-vsix
