@@ -48,6 +48,8 @@ jobs:
   quality:
     needs: validate
     uses: ./.github/workflows/ci.yml
+    with:
+      release: true
 
   release:
     name: Release

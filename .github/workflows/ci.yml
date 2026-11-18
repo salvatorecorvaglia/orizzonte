@@ -11,6 +11,11 @@ on:
       - '**.md'
   workflow_dispatch:
   workflow_call:
+    inputs:
+      release:
+        description: Skip checks that depend on external vulnerability data
+        type: boolean
+        default: false
   schedule:
     - cron: '17 6 * * 1'
 
@@ -139,6 +144,7 @@ jobs:
 
   audit:
     name: Dependency Audit
+    if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
