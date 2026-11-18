@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Update ignore to `7.0.16` and refresh the lockfile and dependency overrides.
 - Update fast-xml-parser to `5.12.1` and VS Code type definitions to `1.146.0`.
-- Refresh extension packaging and frontend tooling, including vsce `4.1.1`, ovsx `1.4.0`, Playwright `1.65.1`, Vite `8.3.8`, and Biome `2.6.8`, along with dependency overrides and the lockfile.
+- Refresh extension packaging and frontend tooling, including vsce `4.1.1`, ovsx `1.4.0`, Playwright `1.65.1`, Vite `8.3.8`, Biome `2.6.8`, and Vitest with V8 coverage `5.1.1`, along with dependency overrides and the lockfile.
 
 ## [1.3.0] - 2026-11-06
 
