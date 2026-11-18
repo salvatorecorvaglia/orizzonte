@@ -24,12 +24,13 @@ permissions:
 
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -58,6 +59,7 @@ jobs:
       - name: Upload VSIX
         uses: actions/upload-artifact@v6
         with:
+          compression-level: 0
           name: orizzonte-vsix
           path: '*.vsix'
           retention-days: 7
@@ -65,6 +67,7 @@ jobs:
   test:
     name: Unit Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -96,6 +99,7 @@ jobs:
   integration-test:
     name: Integration Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -146,6 +150,7 @@ jobs:
     name: Dependency Audit
     if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -168,6 +173,7 @@ jobs:
   browser-test:
     name: Webview Browser Smoke
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --ipc=host
