@@ -24,10 +24,10 @@ minimumReleaseAgeExclude:
   - fast-xml-parser@5.11.1 || 5.12.1
   - '@types/node@26.4.0 || 26.4.1'
   - '@testing-library/react@16.3.3'
-  - '@vitest/mocker@5.0.2'
-  - '@vitest/spy@5.0.2'
-  - vitest@5.0.2
-  - '@vitest/coverage-v8@5.0.2'
+  - '@vitest/mocker@5.0.2 || 5.1.1'
+  - '@vitest/spy@5.0.2 || 5.1.1'
+  - vitest@5.0.2 || 5.1.1
+  - '@vitest/coverage-v8@5.0.2 || 5.1.1'
   - react@19.3.1
   - react-dom@19.3.1
   - ignore@7.0.13 || 7.0.16
