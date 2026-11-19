@@ -10,8 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Update ignore to `7.0.16` and refresh the lockfile and dependency overrides.
-- Update fast-xml-parser to `5.12.1` and VS Code type definitions to `1.146.0`.
+- Update fast-xml-parser to `5.12.1`.
 - Refresh extension packaging and frontend tooling, including vsce `4.1.1`, ovsx `1.4.0`, Playwright `1.65.1`, Vite `8.3.8`, Biome `2.6.8`, and Vitest with V8 coverage `5.1.1`, along with dependency overrides and the lockfile.
+- Align VS Code type definitions with the supported extension API at `1.107.0`.
+- Add weekly Dependabot checks for GitHub Actions and npm dependencies; refresh CI actions.
+- Preserve tag-triggered CI runs, skip dependency audits during release checks, and set explicit CI and release timeouts.
+
+### Fixed
+
+- Run required CI checks for Markdown-only pull requests.
+- Align the CI Playwright browser image and version check with the installed `1.65.1` dependency.
 
 ## [1.3.0] - 2026-11-06
 
