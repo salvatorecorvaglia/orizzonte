@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-20
+
 ### Changed
 
 - Update ignore to `7.0.16` and refresh the lockfile and dependency overrides.
